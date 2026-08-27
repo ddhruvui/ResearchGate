@@ -1,0 +1,69 @@
+# PSO + LS-SVM next-day prediction — experiment configuration.
+# Implements MachineLearningModel.pdf (Hegazy, Soliman & Abdul Salam, IJCST 4(12) 2013)
+# with the corrections documented in README.md.
+
+run_id: pso_lssvm_v1
+
+data:
+  tickers_file: tickers.json      # 100 S&P 500 names, this repo
+  source_prefix: data             # <SOURCE_VOLUME>/data/<TICKER>.json
+  splits_prefix: data/splits      # <SOURCE_VOLUME>/data/splits/<TICKER>.json
+
+backtest:
+  start: "2021-01-04"             # first GRADED prediction
+  end: null                       # null = last session with a known actual
+  window: rolling                 # rolling | expanding
+  window_sessions: 1260           # ~5y; ignored when window=expanding
+  min_train_rows: 250             # staggered entry gate for late listings
+  refit_every: 1                  # refit the model every N sessions (1 = daily, per spec)
+
+target:
+  # Predict the next session's RETURN, not the price level. Price levels are
+  # non-stationary over 26 years and kernel methods extrapolate badly; direction
+  # falls straight out of the sign of the predicted return.
+  kind: next_session_return
+
+features:
+  # The paper's five indicators (eq 13-20) plus one lagged-return "historical data"
+  # input = the six input vectors of section IV.
+  rsi_period: 14
+  mfi_period: 14
+  stoch_period: 14
+  ema_period: 12
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  lagged_return: 1
+
+model:
+  kernel: rbf                     # rbf | mlp   (see README: the paper's MLP kernel is not PSD)
+  # Search bounds are log10. PSO tunes C (cost penalty) and the kernel parameter.
+  # The paper also lists epsilon, which does not exist in the LS-SVM formulation
+  # it derives (eq 2-6 use squared error) — see README.
+  log10_C_bounds: [-2.0, 4.0]
+  log10_gamma_bounds: [-4.0, 2.0]
+
+pso:
+  enabled: true
+  swarm_size: 20
+  iterations: 30
+  inertia: 0.729                  # Clerc-Kennedy constriction
+  c1: 1.494
+  c2: 1.494
+  valid_fraction: 0.2             # inner split of the TRAIN window for fitness
+  # mse | ic | rank_ic | direction.  mse reproduces the paper and is a TRAP: with
+  # weak signal its optimum is "predict zero", which is what the first backtest
+  # produced (predictions 21% of real move size, correlation 0.024). rank_ic is
+  # scale-invariant so shrinking cannot game it. See src/pso.py:_score.
+  fitness: rank_ic
+  # once | annual | quarterly. Each tuning event sees ONLY the trailing window
+  # strictly before it, so the rule is identical in backtest and in daily use.
+  # Quarterly is the finest cadence a full backtest can still validate:
+  # monthly is 21x the cost, weekly 90x (see README).
+  retune: quarterly
+  seed: 7
+
+output:
+  prefix: runs                    # <RESULTS_VOLUME>/runs/<run_id>/
+  write_predictions: true
+  write_metrics: true
