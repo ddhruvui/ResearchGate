@@ -69,6 +69,92 @@ JSON
 )
 }
 
+# Cheapest-first GPU type ids, from the GraphQL catalogue. Only consulted when
+# CPU capacity is exhausted — this workload is CPU-only (dense linear algebra in
+# numpy), so the GPU sits idle; a GPU pod is bought purely for its host CPU and
+# RAM when no CPU pod can be placed. GPU_MAX_PRICE caps the spend.
+gpu_candidates() {
+  curl -sS --max-time 30 -X POST "https://api.runpod.io/graphql" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+    -d '{"query":"query { gpuTypes { id secureCloud lowestPrice(input:{gpuCount:1}) { uninterruptablePrice } } }"}' \
+    2>/dev/null | python3 -c '
+import json, os, sys
+cap = float(os.environ.get("GPU_MAX_PRICE", "0.50"))
+try:
+    g = json.load(sys.stdin)["data"]["gpuTypes"]
+except Exception:
+    sys.exit(0)
+# secureCloud only: the network volume lives in a RunPod-operated datacenter,
+# and community-cloud hosts cannot mount it — trying them wastes every attempt.
+rows = [(x["lowestPrice"]["uninterruptablePrice"], x["id"]) for x in g
+        if x.get("lowestPrice") and x["lowestPrice"].get("uninterruptablePrice")
+        and x.get("secureCloud")]
+for price, gid in sorted(rows):
+    if price <= cap:
+        print(f"{price}\t{gid}")
+'
+}
+
+launch_gpu() {
+  local n=0
+  echo "  CPU exhausted — falling back to GPU (cheapest first, cap \$${GPU_MAX_PRICE:-0.50}/hr)" >&2
+  while IFS=$'\t' read -r PRICE GID; do
+    [ -z "$GID" ] && continue
+    n=$((n+1)); [ "$n" -gt "${GPU_MAX_TRIES:-8}" ] && break
+    echo "  trying GPU \$${PRICE}/hr: ${GID}"
+    PAYLOAD=$(cat <<JSON
+{
+  "name": "${NAME}",
+  "computeType": "GPU",
+  "cloudType": "SECURE",
+  "gpuTypeIds": ["${GID}"],
+  "gpuCount": 1,
+  "imageName": "${IMAGE}",
+  "networkVolumeId": "${RESULTS_VOLUME_ID}",
+  "containerDiskInGb": ${RUNPOD_CONTAINER_DISK_GB:-20},
+  "volumeMountPath": "/workspace",
+  "dataCenterIds": ["${DC}"],
+  "dockerStartCmd": ["bash", "/workspace/code/bootstrap.sh"],
+  "env": {
+    "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
+    "AWS_SECRET_ACCESS_KEY": "${AWS_SECRET_ACCESS_KEY}",
+    "SOURCE_VOLUME_ID": "${SOURCE_VOLUME_ID}",
+    "RESULTS_VOLUME_ID": "${RESULTS_VOLUME_ID}",
+    "RUNPOD_S3_REGION": "${S3_REGION}",
+    "RUNPOD_S3_ENDPOINT": "${S3_ENDPOINT}",
+    "RUNPOD_TERMINATE_KEY": "${RUNPOD_API_KEY}",
+    "RUN_MODE": "${RUN_MODE:-both}",
+    "RUN_LIMIT": "${RUN_LIMIT:-0}",
+    "SHARD": "${SHARD:-0}",
+    "SHARDS": "${SHARDS:-1}",
+    "WORKERS": "${WORKERS:-0}",
+    "WATCHDOG_SEC": "${WATCHDOG_SEC:-25200}"
+  }
+}
+JSON
+)
+    RESP=$(curl -sS -w $'\n%{http_code}' -X POST https://rest.runpod.io/v1/pods \
+      -H "Authorization: Bearer ${RUNPOD_API_KEY}" -H 'Content-Type: application/json' -d "$PAYLOAD")
+    CODE=$(printf '%s' "$RESP" | tail -n1); BODY=$(printf '%s' "$RESP" | sed '$d')
+    if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
+      POD_ID=$(printf '%s' "$BODY" | RESULTS_VOLUME_ID="$RESULTS_VOLUME_ID" SOURCE_VOLUME_ID="$SOURCE_VOLUME_ID" python3 -c '
+import json, os, sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+if isinstance(d, list): d = d[0] if d else {}
+pid = d.get("id", "")
+if pid and pid not in (os.environ.get("RESULTS_VOLUME_ID",""), os.environ.get("SOURCE_VOLUME_ID","")):
+    print(pid)
+')
+      if [ -n "$POD_ID" ]; then
+        echo "  placed on GPU ${GID} at \$${PRICE}/hr (GPU unused; bought for host CPU)"
+        return 0
+      fi
+    fi
+  done < <(gpu_candidates)
+  return 1
+}
+
 launch_one() {
 POD_ID=""
 for VCPU in $VCPU_LADDER; do
@@ -113,8 +199,12 @@ if pid and pid not in (os.environ.get("RESULTS_VOLUME_ID",""), os.environ.get("S
   exit 1
 done
 if [ -z "$POD_ID" ]; then
-  echo "  no CPU capacity in $DC at any size for $NAME" >&2
-  return 1
+  if [ "${GPU_FALLBACK:-1}" = "1" ]; then
+    launch_gpu || { echo "  no CPU or GPU capacity in $DC for $NAME" >&2; return 1; }
+  else
+    echo "  no CPU capacity in $DC at any size for $NAME (GPU fallback disabled)" >&2
+    return 1
+  fi
 fi
 printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$NAME" "$POD_ID" >> "$ROOT/launched-pods.log"
 echo "  launched $NAME -> ${POD_ID}"
