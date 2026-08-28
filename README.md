@@ -1,5 +1,11 @@
 # PSO + LS-SVM next-session prediction
 
+> **To run this, say:**
+> *"We have new data for &lt;DATE&gt;. Run the daily pipeline and monitor it."* (`/daily-run`)
+> or *"Re-run the full backtest from scratch with quarterly re-tuning, and monitor it."* (`/quarterly-backtest`)
+>
+> Copy-paste prompts, expected output, and troubleshooting: **[RUNBOOK.md](RUNBOOK.md)**
+
 Implementation of **"A Machine Learning Model for Stock Market Prediction"** —
 Hegazy, Soliman & Abdul Salam, *IJCST* 4(12), Dec 2013
 ([MachineLearningModel.pdf](MachineLearningModel.pdf)) — applied to the top 100
