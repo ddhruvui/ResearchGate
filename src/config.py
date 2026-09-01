@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # The source volume is READ-ONLY, always. It is declared here as a constant so the
 # guard in storage.py has a single authority to compare against.
-SOURCE_VOLUME_ID = "8qik4zxpxq"
+SOURCE_VOLUME_ID = "crimtr8kbf"
 
 
 @dataclass(frozen=True)

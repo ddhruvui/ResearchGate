@@ -5,7 +5,7 @@
 #   RUN_LIMIT=5 scripts/launch.sh     # smoke test on 5 tickers
 #   DRY_RUN=1 scripts/launch.sh       # show what would happen, touch nothing
 #
-# The pod mounts ONLY x3n7kgbbit. 8qik4zxpxq is read over S3, read-only.
+# The pod mounts ONLY x3n7kgbbit. crimtr8kbf is read over S3, read-only.
 . "$(dirname "$0")/_common.sh"
 
 IMAGE="${RUNPOD_IMAGE:-python:3.11-slim}"
