@@ -52,7 +52,7 @@ export default function App () {
       )}
       <h1>PSO + LS-SVM — did it beat the guess?</h1>
       <p className="sub">
-        {o.n.toLocaleString()} graded next-session predictions · {summary.nTickers} S&amp;P 500 names ·
+        {o.n.toLocaleString()} graded next-session predictions · {summary.nTickers} large-cap names ·
         {' '}{summary.range.start} → {summary.range.end}
         <br />
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
