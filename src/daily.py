@@ -47,7 +47,7 @@ from .indicators import FEATURES, build_features, next_session_return
 from .lssvm import LSSVM
 from .metrics import score
 from .pso import optimise
-from .storage import ResultStore, SourceStore
+from .storage import LayeredSource, ResultStore
 from .walkforward import _train_slice
 
 RAW_COLS = ["date", "ticker", "pred_return", "actual_return", "n_train",
@@ -59,7 +59,7 @@ _ENV = _SRC = None
 def _init_worker():
     global _ENV, _SRC
     _ENV = Env.load()
-    _SRC = SourceStore(_ENV)
+    _SRC = LayeredSource(_ENV)
 
 
 def _rss_mb() -> float:
@@ -175,7 +175,7 @@ def main() -> int:
 
     cfg = load_config(args.config)
     env = Env.load()
-    src, dst = SourceStore(env), ResultStore(env)
+    src, dst = LayeredSource(env), ResultStore(env)
     tickers = load_tickers(cfg)
     if args.limit:
         tickers = tickers[:args.limit]
@@ -226,9 +226,15 @@ def main() -> int:
     # would grade something the model never actually said.
     if stored:
         stored_asof = max(pd.Timestamp(r["as_of"]) for r in stored.values())
-        probe = load_adjusted(SourceStore(env), tickers[0], cfg)
-        if not probe.empty:
-            latest_bar = pd.Timestamp(probe["date"].iloc[-1])
+        # Probe a few tickers, not one: a staged ext ticker whose refresh hasn't
+        # run yet must not make the whole universe look stale.
+        latest_bar = None
+        for pt in {tickers[0], tickers[len(tickers) // 2], tickers[-1]}:
+            probe = load_adjusted(src, pt, cfg)
+            if not probe.empty:
+                d = pd.Timestamp(probe["date"].iloc[-1])
+                latest_bar = d if latest_bar is None else max(latest_bar, d)
+        if latest_bar is not None:
             if latest_bar <= stored_asof:
                 print(f"source latest bar {latest_bar.date()} is not past the stored "
                       f"guess as-of {stored_asof.date()} — nothing to do.", flush=True)

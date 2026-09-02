@@ -45,11 +45,12 @@ Or:
 /quarterly-backtest
 ```
 
-**What happens:** clears the results volume, replays all 100 tickers from
-2021-01-04 across 20 parallel pods with PSO re-tuning at every quarter boundary,
-then merges and rescores globally.
+**What happens:** clears the results volume's `runs/` prefix, refreshes the
+staged ext tickers, replays all 167 tickers from 2021-01-04 across 20 parallel
+pods with PSO re-tuning at every quarter boundary, then merges and rescores
+globally.
 
-**How long:** ~3.5 hours. **Cost:** ~$12.
+**How long:** ~4–6 hours. **Cost:** ~$15–20.
 
 **This wipes the current results**, including the accumulated live log. It backs
 up to `results/backup/` first. Do not run it casually.
@@ -82,9 +83,9 @@ the **edge over that baseline**.
 | Correlation with actuals | ~0.003 | Yes — this is what "no signal" looks like |
 | Live-only edge | swings wildly | **No** — see below |
 
-The live figure is computed over a handful of sessions, and 100 same-day
+The live figure is computed over a handful of sessions, and 167 same-day
 predictions across correlated stocks are worth ~2–6 independent observations,
-not 100. It will read +10pp one day and −10pp the next. It needs months.
+not 167. It will read +10pp one day and −10pp the next. It needs months.
 
 ---
 
@@ -133,7 +134,7 @@ cd dashboard && npm start     # http://localhost:8891
 | Symptom | What it means | Fix |
 |---|---|---|
 | `nothing to do` | already processed, or vendor hasn't published | Not a failure. Check the source's newest bar |
-| `to grade : <100` | stored forecast file was clobbered | `python3 -m src.merge --shards 20` to restore |
+| `to grade : <167` | stored forecast file was clobbered, or staged ext tickers went stale | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh |
 | `run exit=137` | out of memory | Should not recur; report it if it does |
 | `no CPU or GPU capacity` | EU-RO-1 full | Retry in a few minutes; volumes are pinned to that datacenter |
 | Monitor says 0 done but results exist | zsh word-splitting bug | Monitor commands must be wrapped in `bash -c` |
@@ -142,8 +143,10 @@ cd dashboard && npm start     # http://localhost:8891
 
 ## Hard rules
 
-- **`8qik4zxpxq` is read-only.** Market data. Never written, never deleted from.
-  Anything extra goes on `x3n7kgbbit`.
+- **The source volume (`crimtr8kbf`, pinned in `src/config.py`) is read-only.**
+  Market data. Never written, never deleted from. Anything extra goes on
+  `x3n7kgbbit` — including the 31 staged ext tickers under `data/` that
+  `python3 -m src.fetch_ext` maintains (refresh them before the daily run).
 - **A graded verdict is locked.** Prices get restated; the record does not change.
 - **Live and replayed rows are tagged** (`source` = `live` / `backtest`) so a real
   forward track record stays separable from a rehearsal.

@@ -4,14 +4,65 @@ from __future__ import annotations
 import pytest
 
 from src.config import SOURCE_VOLUME_ID, Env
-from src.storage import ResultStore, SourceStore
+from src.storage import LayeredSource, ResultStore, SourceStore
 
 
 def test_source_store_exposes_no_write_methods():
     forbidden = {"put_object", "put_bytes", "put_json", "put_text", "put_dataframe",
                  "delete", "delete_object", "upload_file", "copy", "copy_object"}
-    present = forbidden & set(dir(SourceStore))
-    assert not present, f"SourceStore must not expose write methods, found {present}"
+    for cls in (SourceStore, LayeredSource):
+        present = forbidden & set(dir(cls))
+        assert not present, f"{cls.__name__} must not expose write methods, found {present}"
+
+
+class _NoSuchKey(Exception):
+    pass
+
+
+class _StubPrimary:
+    """SourceStore stand-in: holds some keys, raises NoSuchKey for the rest."""
+    def __init__(self, blobs):
+        self._blobs = blobs
+
+    def get_bytes(self, key):
+        if key not in self._blobs:
+            raise _NoSuchKey(key)
+        return self._blobs[key]
+
+
+class _StubExtClient:
+    def __init__(self, blobs):
+        self._blobs = blobs
+
+    def get_object(self, Bucket, Key):
+        import io
+        if Key not in self._blobs:
+            raise _NoSuchKey(Key)
+        return {"Body": io.BytesIO(self._blobs[Key])}
+
+
+def _layered(primary_blobs, ext_blobs):
+    ls = LayeredSource.__new__(LayeredSource)
+    ls._source = _StubPrimary(primary_blobs)
+    ls._s3 = _StubExtClient(ext_blobs)
+    ls._ext_bucket = "ext"
+    return ls
+
+
+def test_layered_source_prefers_the_source_volume():
+    ls = _layered({"data/T.json": b'{"who": "source"}'},
+                  {"data/T.json": b'{"who": "ext"}'})
+    assert ls.get_json("data/T.json") == {"who": "source"}
+
+
+def test_layered_source_falls_back_to_staged_ext_data():
+    ls = _layered({}, {"data/T.json": b'{"who": "ext"}'})
+    assert ls.get_json("data/T.json") == {"who": "ext"}
+
+
+def test_layered_source_absent_on_both_volumes_is_none():
+    ls = _layered({}, {})
+    assert ls.try_get_json("data/T.json") is None
 
 
 def test_result_store_refuses_the_source_volume(monkeypatch):

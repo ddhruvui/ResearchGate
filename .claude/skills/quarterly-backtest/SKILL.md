@@ -1,13 +1,14 @@
 ---
 name: quarterly-backtest
-description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 100 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) and wants it revalidated, or says "start over" / "rebuild". Takes ~3.5 hours. Not for everyday operation — use daily-run for that.
+description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 167 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~4-6 hours. Not for everyday operation — use daily-run for that.
 ---
 
 # Quarterly backtest (full rebuild)
 
-Replays every session from 2021-01-04 to the latest bar for all 100 tickers,
-re-tuning PSO at each quarter boundary on trailing data only. **~3.5 hours**,
-**~$12**, 20 parallel pods.
+Replays every session from 2021-01-04 to the latest bar for all 167 tickers,
+re-tuning PSO at each quarter boundary on trailing data only. **~4–6 hours**,
+**~$15–20**, 20 parallel pods. (Was ~3.5 h/$12 at 100 tickers; the 67 adds are
+mostly shorter histories, so cost grows less than linearly.)
 
 Working directory is the repo root.
 
@@ -36,17 +37,35 @@ no future information reaches a prediction.
 
 ## 2. Clear the results volume
 
-Only ever `x3n7kgbbit`. **`8qik4zxpxq` is read-only market data and must never be
-written to or deleted from.** Keep a local backup first.
+Only ever `x3n7kgbbit`, and only its `runs/` prefix — `data/` on the same volume
+holds staged ext tickers (see step 3) and must survive the wipe. **The source
+volume (`crimtr8kbf`, pinned in `src/config.py`) is read-only market data and
+must never be written to or deleted from.** Keep a local backup first.
 
 ```bash
 bash -c 'set +e; . scripts/_common.sh; set +e
 mkdir -p results/backup && aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/" results/backup/ --recursive --quiet
-aws s3 rm $S3FLAGS "$DST_BUCKET/" --recursive | tail -2
+aws s3 rm $S3FLAGS "$DST_BUCKET/runs/" --recursive | tail -2
 aws s3 ls $S3FLAGS "$SRC_BUCKET/data/" | head -2'
 ```
 
 The last line is a deliberate check that the source volume is untouched.
+
+## 2b. Stage/refresh ext tickers
+
+The acquisition pipeline only publishes its own universe to the source volume.
+Tickers outside it are staged on the results volume under identical keys and
+read through `LayeredSource`. Refresh them so the replay ends on the same bar
+for every ticker:
+
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate
+bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'
+```
+
+Every staged ticker must report its last bar at the same date the source volume
+carries (compare with AAPL). Failures list at the bottom — do not launch with
+failures outstanding.
 
 ## 3. Launch 20 shards
 
@@ -55,10 +74,11 @@ cd /Users/dhruvdesai/Development/ResearchGate
 SHARDS=20 WATCHDOG_SEC=43200 bash scripts/launch.sh 2>&1 | grep -E "launched|placed at|no capacity at 2|all pods|some pods" | tail -25
 ```
 
-20 shards × 5 tickers keeps each pod under the 12 h watchdog (quarterly re-tuning
-is ~8× the cost of tuning once: 1,415 walk-forward fits **plus 24 × 620 PSO
-fits** per ticker). Tickers are strided (`tickers[k::20]`) so history lengths
-balance across shards.
+20 shards × 8–9 tickers keeps each pod under the 12 h watchdog (quarterly
+re-tuning is ~8× the cost of tuning once: 1,415 walk-forward fits **plus 24 × 620
+PSO fits** per ticker — and many of the 67 added tickers have far shorter
+histories). Tickers are strided (`tickers[k::20]`) so history lengths balance
+across shards.
 
 Expect only some to place — EU-RO-1 capacity is usually tight. Note which are
 missing and start the retry loop:
@@ -119,7 +139,7 @@ It **refuses to publish partial results** to `latest/` (exit 2) — that guard i
 deliberate, since a reader cannot tell 80 tickers from 100 once published. To
 get an early read, `--allow-partial` routes to `latest_partial/` instead.
 
-The merge rescores **globally** across all 100 tickers, so accuracy and baselines
+The merge rescores **globally** across all 167 tickers, so accuracy and baselines
 are not averages of per-shard averages.
 
 ## 6. Report

@@ -5,10 +5,22 @@ description: Run and monitor the everyday PSO+LS-SVM pipeline — grade yesterda
 
 # Daily run
 
-One pass: **grade → learn → guess**. Never replays history. ~40 s of compute for
-100 tickers; the slow part is placing a pod.
+One pass: **grade → learn → guess**. Never replays history. ~1 min of compute for
+167 tickers; the slow part is placing a pod.
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
+
+## 0. Refresh the staged ext tickers
+
+31 of the 167 tickers are outside the acquisition pipeline's universe; their
+bars are staged on the results volume by `src/fetch_ext.py` and do NOT update
+nightly on their own. Refresh them first, or their stored predictions never
+grade:
+
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate
+bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'
+```
 
 ## 1. Confirm the new bar actually landed
 
@@ -39,7 +51,7 @@ import pandas as pd; d=pd.read_parquet('/tmp/ns.parquet')
 print(f'{len(d)} stored guesses, as_of {d[\"as_of\"].astype(str).unique()[0]} -> for {d[\"for_session\"].astype(str).unique()[0]}')"
 ```
 
-**If this shows fewer than 100 rows, stop.** A partial file means a limited run
+**If this shows fewer than 167 rows, stop.** A partial file means a limited run
 overwrote it. Restore with `python3 -m src.merge --shards 20` before continuing.
 
 ## 3. Check nothing is already running
@@ -117,8 +129,8 @@ print(f'next: {len(n)} rows for {n[\"for_session\"].astype(str).unique()[0]}')"
 Report: rows graded, live-row count, the next session's date and up/down split.
 
 **Always caveat the live-only accuracy.** It is computed over very few sessions,
-and same-day predictions across 100 stocks are ~2–6 independent observations,
-not 100 — measured cross-sectional correlation is 0.08–0.25. It swings by tens
+and same-day predictions across 167 stocks are ~2–6 independent observations,
+not 167 — measured cross-sectional correlation is 0.08–0.25. It swings by tens
 of points for weeks. Quote the backtest figure (currently **−1.4pp edge over the
 always-up baseline**) as the real number, and say plainly that the live figure
 means nothing yet.
@@ -127,7 +139,7 @@ means nothing yet.
 
 | Log line | Meaning |
 |---|---|
-| `graded 100 · new guesses 100 · errors 0` | success |
+| `graded 167 · new guesses 167 · errors 0` | success |
 | `nothing to do` | already processed, or vendor has not published. Correct, not a failure |
 | `run exit=137` | OOM. Should not recur (worker count is cgroup-aware), but report it |
-| `to grade : <100` | stored file was clobbered — re-merge before rerunning |
+| `to grade : <167` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like (step 0 skipped) |

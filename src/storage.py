@@ -35,6 +35,11 @@ def _client(env: Env):
     )
 
 
+def _is_absent(exc: Exception) -> bool:
+    """True when an S3 error means 'no such key' rather than a real failure."""
+    return "NoSuchKey" in type(exc).__name__ or "NoSuchKey" in str(exc) or "404" in str(exc)
+
+
 class SourceStore:
     """READ-ONLY view of the market-data volume. Deliberately has no write methods."""
 
@@ -68,6 +73,48 @@ class SourceStore:
         for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 yield obj["Key"]
+
+
+class LayeredSource:
+    """READ-ONLY overlay: a key is served from the source volume first, falling
+    back to the SAME key on the results volume.
+
+    The acquisition pipeline only publishes its own universe to the source
+    volume, and the source volume is never written from here. Tickers outside
+    that universe are staged by `python -m src.fetch_ext` on the RESULTS volume
+    under identical keys (data/<T>.json, data/splits/<T>.json); this class makes
+    the two buckets read as one dataset. Like SourceStore it exposes no write
+    methods.
+    """
+
+    def __init__(self, env: Env):
+        self._source = SourceStore(env)
+        self._s3 = _client(env)
+        self._ext_bucket = env.results_volume
+
+    @property
+    def bucket(self) -> str:
+        return self._source.bucket
+
+    def get_bytes(self, key: str) -> bytes:
+        try:
+            return self._source.get_bytes(key)
+        except Exception as exc:
+            if not _is_absent(exc):
+                raise
+        return self._s3.get_object(Bucket=self._ext_bucket, Key=key)["Body"].read()
+
+    def get_json(self, key: str):
+        return json.loads(self.get_bytes(key))
+
+    def try_get_json(self, key: str):
+        """None when the key is absent on BOTH volumes."""
+        try:
+            return self.get_json(key)
+        except Exception as exc:
+            if _is_absent(exc):
+                return None
+            raise
 
 
 class ResultStore:

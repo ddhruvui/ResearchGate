@@ -5,7 +5,8 @@
   python -m src.run --mode predict
   python -m src.run --limit 5       # smoke test on the first 5 tickers
 
-Reads volume 8qik4zxpxq (READ-ONLY, never mounted). Writes volume x3n7kgbbit.
+Reads the source volume (READ-ONLY, never mounted), with staged extras layered in
+from the results volume (see src/fetch_ext.py). Writes the results volume only.
 """
 from __future__ import annotations
 
@@ -37,11 +38,11 @@ from .data import load_adjusted
 from .indicators import FEATURES, build_features, next_session_return
 from .lssvm import LSSVM
 from .metrics import score
-from .storage import ResultStore, SourceStore
+from .storage import LayeredSource, ResultStore
 from .walkforward import _train_slice, run_ticker
 
 _ENV: Env | None = None
-_SRC: SourceStore | None = None
+_SRC: LayeredSource | None = None
 
 
 def dst_read(dst: ResultStore, key: str) -> bytes:
@@ -52,7 +53,7 @@ def dst_read(dst: ResultStore, key: str) -> bytes:
 def _init_worker():
     global _ENV, _SRC
     _ENV = Env.load()
-    _SRC = SourceStore(_ENV)
+    _SRC = LayeredSource(_ENV)
 
 
 def _one(ticker: str, cfg: dict, mode: str = "both", known: dict | None = None):
@@ -199,7 +200,7 @@ def main() -> int:
 
     cfg = load_config(args.config)
     env = Env.load()
-    src, dst = SourceStore(env), ResultStore(env)
+    src, dst = LayeredSource(env), ResultStore(env)
     tickers = load_tickers(cfg)
     if args.limit:
         tickers = tickers[:args.limit]
