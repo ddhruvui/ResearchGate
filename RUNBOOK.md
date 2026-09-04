@@ -16,7 +16,9 @@ Or invoke it directly:
 
 **What happens:** grades yesterday's stored prediction against the bar that just
 landed, adds that bar to each stock's training window, records a fresh prediction
-for the next session, and pushes everything to `x3n7kgbbit`.
+for the next session, pushes everything to `x3n7kgbbit`, and publishes it to
+MongoDB so the deployed dashboard shows it a couple of minutes later. Nothing is
+downloaded to this machine.
 
 **How long:** ~40 s of compute. Most of the wait is placing a pod — EU-RO-1 is
 often out of CPU, and it retries before falling back to a GPU.

@@ -97,12 +97,12 @@ for i in $(seq 1 90); do
   K=$(aws s3 ls $AWSF s3://x3n7kgbbit/_pod_logs/ 2>/dev/null | grep POD_ID | awk "{print \$4}" | tail -1)
   if [ -n "$K" ]; then
     aws s3 cp $AWSF "s3://x3n7kgbbit/_pod_logs/$K" /tmp/dr.log --quiet 2>/dev/null
-    cur=$(grep -E "resources:|to grade|graded |LIVE-only|next guess|run exit|Killed|Traceback|nothing to do" /tmp/dr.log 2>/dev/null)
+    cur=$(grep -E "resources:|to grade|graded |LIVE-only|next guess|run exit|Killed|Traceback|nothing to do|publishing latest|\[publish\]|mongo publish failed|terminated \(204\)" /tmp/dr.log 2>/dev/null)
     if [ "$cur" != "$prev" ]; then
       diff <(printf "%s\n" "$prev") <(printf "%s\n" "$cur") 2>/dev/null | grep "^>" | sed "s/^> //"
       prev="$cur"
     fi
-    grep -q "run exit" /tmp/dr.log 2>/dev/null && { echo "RUN FINISHED"; exit 0; }
+    grep -q -E "terminated \(204\)|already gone \(404\)|TERMINATION NOT CONFIRMED" /tmp/dr.log 2>/dev/null && { echo "RUN FINISHED"; exit 0; }
   fi
   sleep 20
 done'
@@ -110,23 +110,46 @@ done'
 
 Substitute the real pod id for `POD_ID`. The grep must cover failure signatures
 (`Killed`, `Traceback`), not just the happy path — silence otherwise looks
-identical to a crash.
+identical to a crash. `run exit=0` is not the end: the pod then publishes
+`latest/` to MongoDB for the dashboard (`publishing latest/ to MongoDB` …
+`[publish] ResearchGate: predictions appended +164 …`) and only then
+self-terminates, which is what the loop waits for.
 
-## 6. Verify and report
+## 6. Verify on the dashboard and report
+
+The pod publishes `latest/` to MongoDB itself (`scripts/bootstrap.sh` →
+`python -m src.publish_mongo`), so the deployed UI has the run a couple of
+minutes after `run exit=0`. Verify there — nothing needs downloading:
 
 ```bash
-cd /Users/dhruvdesai/Development/ResearchGate && bash -c 'set +e; . scripts/_common.sh; set +e
-aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/predictions.parquet" /tmp/p.parquet --quiet
-aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/next_session.parquet" /tmp/n.parquet --quiet'
-python3 -c "
-import pandas as pd
-d=pd.read_parquet('/tmp/p.parquet'); n=pd.read_parquet('/tmp/n.parquet')
-print(d['source'].value_counts().to_dict())
-print('live dates:', sorted(pd.to_datetime(d[d.source=='live']['date']).dt.date.astype(str).unique()))
-print(f'next: {len(n)} rows for {n[\"for_session\"].astype(str).unique()[0]}')"
+API=https://research-gate-be.vercel.app
+curl -s --max-time 20 "$API/api/summary" | python3 -c "
+import json,sys; d=json.load(sys.stdin); o=d['overall']; lo=d.get('liveOnly') or {}
+print('published', d['publishedAt'], '| for', d['forSession'], '| asOf', d['asOf'])
+print('rows', d['bySource'], '| range', d['range']['start'], '->', d['range']['end'])
+print('acc %.4f  edge %+.4f  n=%s' % (o['direction_accuracy'], o['edge_vs_always_up'], o['n']))
+print('live-only n=%s acc=%.4f edge=%+.4f' % (lo.get('n'), lo.get('direction_accuracy', 0), lo.get('edge_vs_always_up', 0)))"
+curl -s --max-time 20 "$API/api/next-session" | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+print(f'next: {len(d[\"rows\"])} rows for {d[\"forSession\"]}, {d[\"up\"]} up / {d[\"down\"]} down')"
 ```
 
-Report: rows graded, live-row count, the next session's date and up/down split.
+`forSession` must be the session after the bar that just landed, `bySource.live`
+must have grown by the graded count, and `publishedAt` must be later than the
+pod's `stamp`. The API caches for 60 s and Vercel's edge for another 60 s, so
+re-check once if it looks a run behind.
+
+If the pod log shows `[publish] FAILED`, or no `publishing latest/` line at all
+(`MONGO_URI` was empty in `.env` when it was launched), the results are safely
+on the volume. Publish them from here — this reads S3 and writes Mongo without
+saving anything locally:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo'
+```
+
+Report: rows graded, live-row count, the next session's date and up/down split,
+and that the dashboard shows it.
 
 **Always caveat the live-only accuracy.** It is computed over very few sessions,
 and same-day predictions across 167 stocks are ~2–6 independent observations,
@@ -142,4 +165,7 @@ means nothing yet.
 | `graded 167 · new guesses 167 · errors 0` | success |
 | `nothing to do` | already processed, or vendor has not published. Correct, not a failure |
 | `run exit=137` | OOM. Should not recur (worker count is cgroup-aware), but report it |
+| `[publish] ResearchGate: predictions appended +164 …` | the dashboard has the run |
+| `[publish] FAILED: …` | run succeeded, dashboard stale — republish from the laptop (step 6). `ServerSelectionTimeoutError` from the pod usually means Atlas Network Access does not allow it |
+| no `publishing latest/` line after `run exit=0` | `MONGO_URI` was empty in `.env` at launch — republish from the laptop |
 | `to grade : <167` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like (step 0 skipped) |
