@@ -50,7 +50,9 @@ Or:
 **What happens:** clears the results volume's `runs/` prefix, refreshes the
 staged ext tickers, replays all 167 tickers from 2021-01-04 across 20 parallel
 pods with PSO re-tuning at every quarter boundary, then merges and rescores
-globally.
+globally and publishes the merged run to MongoDB, replacing the old run's rows
+so the dashboard switches to the rebuild. While the pods run, the dashboard
+keeps showing the previous run.
 
 **How long:** ~4–6 hours. **Cost:** ~$15–20.
 

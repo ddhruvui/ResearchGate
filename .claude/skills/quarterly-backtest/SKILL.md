@@ -51,6 +51,10 @@ aws s3 ls $S3FLAGS "$SRC_BUCKET/data/" | head -2'
 
 The last line is a deliberate check that the source volume is untouched.
 
+The deployed dashboard is unaffected by the wipe: it reads MongoDB, which still
+holds the previous run until step 5 publishes the merged rebuild over it. There
+is no gap in what the UI shows.
+
 ## 2b. Stage/refresh ext tickers
 
 The acquisition pipeline only publishes its own universe to the source volume.
@@ -142,10 +146,42 @@ get an early read, `--allow-partial` routes to `latest_partial/` instead.
 The merge rescores **globally** across all 167 tickers, so accuracy and baselines
 are not averages of per-shard averages.
 
+It then **publishes to MongoDB itself** (`src.merge` → `publish(full=True)`):
+every row of the run is replaced, because a rebuild changes old rows too, not
+just appends. Expect `[publish] ResearchGate: predictions replaced +220,929 …`
+after `written to s3://…/latest/`; about three minutes. The `.env` sourced above
+is what supplies `MONGO_URI`.
+
+## 5b. Confirm the dashboard switched to the rebuild
+
+```bash
+API=https://research-gate-be.vercel.app
+curl -s --max-time 20 "$API/api/summary" | python3 -c "
+import json,sys; d=json.load(sys.stdin); o=d['overall']; m=d.get('runMeta') or {}
+print('published', d['publishedAt'], '| merged', m.get('merged_utc'), '| shards', m.get('shards_found'), '/', m.get('shards_expected'))
+print('rows', d['bySource'], '| range', d['range']['start'], '->', d['range']['end'])
+print('acc %.4f  edge %+.4f  n=%s' % (o['direction_accuracy'], o['edge_vs_always_up'], o['n']))"
+```
+
+`runMeta.merged_utc` present (a daily run has `mode: daily` instead) and
+`publishedAt` after the merge mean the UI is on the new run; allow two minutes
+for the API and edge caches. If `[publish] FAILED` appeared, the merged results
+are on the volume — publish them by hand, reading S3 and writing Mongo with
+nothing saved locally:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo --full'
+```
+
+`--full` matters here: without it the publisher would only append rows it does
+not have and leave the old run's rows in place under the same run id (a
+fingerprint guard usually catches that and falls back to a full replace, but do
+not rely on it).
+
 ## 6. Report
 
 Give the pooled edge over the always-up baseline, the per-year table, and the
-predicted/actual correlation. State the baseline explicitly — accuracy alone is
+predicted/actual correlation, and say that the dashboard now shows the rebuild. State the baseline explicitly — accuracy alone is
 meaningless, since a coin flip is the wrong benchmark and the always-up baseline
 sits near 52.4%.
 
@@ -161,3 +197,5 @@ correlation ~0.003, negative in every year.**
 | `Container Disk must be <= 20` | `RUNPOD_CONTAINER_DISK_GB` above the flavor cap |
 | Pod id equals the volume id | greedy `sed` for `"id"`; parse JSON properly |
 | Finished shards relaunching | retry loop checking "running" instead of "completed" |
+| `[publish] FAILED: ServerSelectionTimeoutError` after the merge | Atlas unreachable or wrong `DB_PASSWORD` in `.env`; results are on the volume, republish per 5b |
+| Dashboard shows the rebuild's metrics but the daily live log is gone | expected — the wipe discards the accumulated live rows and the rebuild replaces the run; the pre-wipe copy is in `results/backup/` |
