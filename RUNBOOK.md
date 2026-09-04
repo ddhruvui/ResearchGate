@@ -108,7 +108,7 @@ and both read what the pipeline published to **MongoDB Atlas** (database
 Deployed URLs (the `dashboard` skill reads them from here):
 
 - API: `https://research-gate-be.vercel.app` — try `https://research-gate-be.vercel.app/api/health`
-- UI: `https://<render-site>.onrender.com` — fill in once the Render site exists
+- UI: `https://researchgatefe.onrender.com`
 
 > **Open the dashboard and tell me what it says.**
 

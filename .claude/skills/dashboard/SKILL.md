@@ -18,9 +18,10 @@ after a daily run, `src.merge` after a rebuild. The API reads Mongo with a 60 s
 cache (plus 60 s at Vercel's edge). The UI is a static bundle that calls the API
 at the `VITE_API_BASE` it was built with.
 
-The API is deployed at `https://research-gate-be.vercel.app`. The UI's Render URL lives in RUNBOOK.md,
-section "Dashboard"; if it is still a placeholder the user has not deployed the
-site yet — say so, and fall back to §3.
+Deployed URLs (also in RUNBOOK.md → Dashboard):
+
+- UI: `https://researchgatefe.onrender.com` — open this in the Browser pane to see it rendered
+- API: `https://research-gate-be.vercel.app`
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
 
@@ -75,7 +76,8 @@ cd /Users/dhruvdesai/Development/ResearchGateFE && npm install && npm run dev   
 The backend needs `.env` with the same three Mongo keys (`.env.example` lists
 them). It reads the same Atlas database, so it shows exactly what Render will.
 Open `http://localhost:5273` in the Browser pane and screenshot it — do not ask
-the user to check for you.
+the user to check for you. (For the deployed site, open the Render URL above the
+same way.)
 
 ## 4. The banners
 
