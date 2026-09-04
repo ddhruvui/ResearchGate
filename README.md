@@ -190,6 +190,31 @@ RUN_MODE=predict scripts/launch.sh
 `predict` mode skips the 1,415-step replay and reuses the hyper-parameters PSO
 found on the last full backtest — seconds per ticker instead of minutes.
 
+### Dashboard
+
+The results are viewed on a deployed UI, not on this machine. The pipeline
+publishes `runs/<run_id>/latest/` to MongoDB Atlas (database `ResearchGate`),
+and two small repos serve it:
+
+| Piece | Repo | Runs on |
+|---|---|---|
+| API (Express) | [ddhruvui/ResearchGateBE](https://github.com/ddhruvui/ResearchGateBE) | Vercel |
+| UI (React/Vite) | [ddhruvui/ResearchGateFE](https://github.com/ddhruvui/ResearchGateFE) | Render |
+
+Publishing is automatic: `scripts/bootstrap.sh` runs `src.publish_mongo` after a
+daily run, and `src.merge` runs it after a rebuild. By hand:
+
+```sh
+python3 -m src.publish_mongo            # append what Mongo lacks (idempotent)
+python3 -m src.publish_mongo --full     # after a rebuild: replace the run's rows
+```
+
+It needs `MONGO_URI`, `DB_PASSWORD` and `MONGO_DB` in `.env` (see
+`.env.example`); with them unset it prints a notice and does nothing. The
+publisher also pre-computes the equity curves for the UI's cost levels, so the
+API never scans the 220k-row `predictions` collection on a page load. See
+`RUNBOOK.md` for the day-to-day commands.
+
 ### Cost
 
 An LS-SVM fit solves a dense `(n+1)x(n+1)` system, so cost is `O(n^3)` in the
@@ -214,6 +239,8 @@ src/pso.py               eq 11-12
 src/walkforward.py       the daily loop + the no-leak assertion
 src/metrics.py           direction, baselines, per-year
 src/run.py               entrypoint
+src/daily.py             grade -> learn -> guess, the everyday path
+src/publish_mongo.py     latest/ -> MongoDB Atlas, for the deployed dashboard
 scripts/launch.sh        bundle -> results volume -> CPU pod -> self-terminate
 tests/                   leakage proof, model sanity, storage guards
 ```

@@ -93,6 +93,15 @@ def main() -> int:
     print(f"written to s3://{dst.bucket}/{out}/"
           + ("   [PARTIAL]" if missing else ""))
 
+    # A rebuild changes every row, so the deployed dashboard's copy is replaced
+    # wholesale. Partial merges never reach latest/, so they never reach Mongo.
+    if not missing:
+        try:
+            from .publish_mongo import publish
+            publish(full=True)
+        except Exception as exc:                  # results are on the volume already
+            print(f"mongo publish failed (results are on the volume): {exc}")
+
     if args.local_out:
         import os
         os.makedirs(args.local_out, exist_ok=True)

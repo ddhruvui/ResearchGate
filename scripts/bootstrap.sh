@@ -42,6 +42,16 @@ ec=$?
 echo "run exit=$ec ($([ $ec -eq 124 ] && echo 'WATCHDOG TIMEOUT' || echo exited)) $(date -u +%FT%TZ)"
 sync 2>/dev/null
 
+# Publish latest/ to MongoDB for the deployed dashboard. Only when this pod wrote
+# latest/ itself (a daily run, or an unsharded full run); a sharded backtest is
+# merged and published from the laptop by src.merge. The run has already landed
+# on the volume, so a Mongo failure is never fatal.
+if [ "$ec" -eq 0 ] && [ -n "${MONGO_URI:-}" ] && { [ "${RUN_MODE:-both}" = "daily" ] || [ "${SHARDS:-1}" -le 1 ]; }; then
+  FULL=""; [ "${RUN_MODE:-both}" != "daily" ] && FULL="--full"
+  echo "publishing latest/ to MongoDB ${FULL} ..."
+  timeout 900 python -m src.publish_mongo $FULL || echo "!! mongo publish failed (the run itself succeeded)"
+fi
+
 # Self-terminate with the ACCOUNT key; the pod-injected key 403s on DELETE.
 for attempt in $(seq 1 12); do
   timeout 60 python - <<'PY'

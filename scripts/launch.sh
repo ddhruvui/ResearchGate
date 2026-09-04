@@ -62,7 +62,10 @@ PAYLOAD=$(cat <<JSON
     "SHARDS": "${SHARDS:-1}",
     "RUN_LIMIT": "${RUN_LIMIT:-0}",
     "WORKERS": "${WORKERS:-0}",
-    "WATCHDOG_SEC": "${WATCHDOG_SEC:-25200}"
+    "WATCHDOG_SEC": "${WATCHDOG_SEC:-25200}",
+    "MONGO_URI": "${MONGO_URI:-}",
+    "DB_PASSWORD": "${DB_PASSWORD:-}",
+    "MONGO_DB": "${MONGO_DB:-ResearchGate}"
   }
 }
 JSON
@@ -128,7 +131,10 @@ launch_gpu() {
     "SHARD": "${SHARD:-0}",
     "SHARDS": "${SHARDS:-1}",
     "WORKERS": "${WORKERS:-0}",
-    "WATCHDOG_SEC": "${WATCHDOG_SEC:-25200}"
+    "WATCHDOG_SEC": "${WATCHDOG_SEC:-25200}",
+    "MONGO_URI": "${MONGO_URI:-}",
+    "DB_PASSWORD": "${DB_PASSWORD:-}",
+    "MONGO_DB": "${MONGO_DB:-ResearchGate}"
   }
 }
 JSON

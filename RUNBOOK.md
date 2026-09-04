@@ -91,6 +91,21 @@ not 167. It will read +10pp one day and −10pp the next. It needs months.
 
 ## Dashboard
 
+The UI is deployed. **Render** serves the React site, **Vercel** serves the API,
+and both read what the pipeline published to **MongoDB Atlas** (database
+`ResearchGate`). Nothing has to run on this laptop.
+
+| Piece | Repo | Runs on |
+|---|---|---|
+| UI | [ddhruvui/ResearchGateFE](https://github.com/ddhruvui/ResearchGateFE) | Render static site |
+| API | [ddhruvui/ResearchGateBE](https://github.com/ddhruvui/ResearchGateBE) | Vercel serverless function |
+| Data | this repo, `src/publish_mongo.py` | MongoDB Atlas, db `ResearchGate` |
+
+Fill these in once deployed (the `dashboard` skill reads them from here):
+
+- API: `https://<vercel-project>.vercel.app`
+- UI: `https://<render-site>.onrender.com`
+
 > **Open the dashboard and tell me what it says.**
 
 Or:
@@ -99,33 +114,34 @@ Or:
 /dashboard
 ```
 
-**What happens:** checks whether it is already up on 8891 — it usually is, and
-stays up for days — confirms it is serving the results volume and not a local
-backup, and reads out the figures.
+**It refreshes itself.** The daily pod publishes to Mongo right after it writes
+`latest/` (`scripts/bootstrap.sh`), and `python3 -m src.merge` publishes after a
+full rebuild. The API caches for 60 s and Vercel's edge for another 60 s, so a
+new run is on screen within a couple of minutes.
 
-**How long:** seconds. **Cost:** nothing. It only reads what the pipeline wrote.
+To publish by hand — after a merge done elsewhere, or if the pod's publish step
+failed:
 
-**It refreshes itself.** New results appear within 60 s with no restart, so
-"download the new results for the UI" is a no-op: `scripts/results.sh` pulls a
-local snapshot that the server ignores whenever credentials are present.
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo'
+```
 
-A **red banner** means it fell back to a stale local backup because the results
-volume returned nothing — those numbers are from an older run with different
-settings. Do not quote them.
+Safe to repeat. Graded rows are locked, so a re-publish only appends rows Mongo
+does not have yet (seconds). After a rebuild add `--full`; `src.merge` already
+does. A first seed of 220k rows takes about three minutes.
+
+A **"last published N days ago" banner** means Mongo has not been written to
+for more than five days — the daily run did not go through, or its publish step
+failed. Check the pod log for `publishing latest/ to MongoDB` and `[publish]
+FAILED`, then run the daily or republish by hand.
 
 ### Variants
 
-> The dashboard is showing a red banner — work out why and fix it.
+> Is the dashboard showing today's run?
 
-> I changed the equity chart — rebuild the UI and show me.
+> The dashboard says it was last published four days ago — work out why.
 
-> Is the UI up, and does it already have today's run?
-
-Manual start, without the skill:
-
-```bash
-cd dashboard && npm start     # http://localhost:8891
-```
+> Publish the latest results to the dashboard.
 
 ---
 
@@ -138,6 +154,7 @@ cd dashboard && npm start     # http://localhost:8891
 | `run exit=137` | out of memory | Should not recur; report it if it does |
 | `no CPU or GPU capacity` | EU-RO-1 full | Retry in a few minutes; volumes are pinned to that datacenter |
 | Monitor says 0 done but results exist | zsh word-splitting bug | Monitor commands must be wrapped in `bash -c` |
+| `[publish] FAILED` in the pod log | Mongo unreachable, or `MONGO_URI`/`DB_PASSWORD` wrong in `.env` | Results are on the volume; republish by hand with `python3 -m src.publish_mongo` |
 
 ---
 

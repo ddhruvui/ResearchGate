@@ -1,4 +1,14 @@
-# Outcome dashboard
+# Outcome dashboard — SUPERSEDED
+
+> **This directory is no longer the way the results are viewed.** The UI now
+> lives in [ddhruvui/ResearchGateFE](https://github.com/ddhruvui/ResearchGateFE)
+> (deployed on Render) and the API in
+> [ddhruvui/ResearchGateBE](https://github.com/ddhruvui/ResearchGateBE)
+> (deployed on Vercel), both reading what `src/publish_mongo.py` writes to
+> MongoDB Atlas. See `RUNBOOK.md` → Dashboard. This copy reads the S3 volume
+> directly and is kept only for reference; it can be deleted with
+> `git rm -r dashboard`.
+
 
 Node/Express API + React (Vite) frontend over the PSO + LS-SVM backtest.
 
