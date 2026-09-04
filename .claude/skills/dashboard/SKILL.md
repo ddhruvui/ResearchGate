@@ -18,15 +18,16 @@ after a daily run, `src.merge` after a rebuild. The API reads Mongo with a 60 s
 cache (plus 60 s at Vercel's edge). The UI is a static bundle that calls the API
 at the `VITE_API_BASE` it was built with.
 
-The deployed URLs live in RUNBOOK.md, section "Dashboard". If they are still
-placeholders, the user has not deployed yet — say so, and fall back to §3.
+The API is deployed at `https://research-gate-be.vercel.app`. The UI's Render URL lives in RUNBOOK.md,
+section "Dashboard"; if it is still a placeholder the user has not deployed the
+site yet — say so, and fall back to §3.
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
 
 ## 1. Is it showing the current run? — check before doing anything
 
 ```bash
-API=https://<vercel-project>.vercel.app          # from RUNBOOK.md
+API=https://research-gate-be.vercel.app          # RUNBOOK.md → Dashboard
 curl -s --max-time 20 "$API/api/health"
 ```
 

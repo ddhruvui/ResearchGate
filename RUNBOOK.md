@@ -101,10 +101,10 @@ and both read what the pipeline published to **MongoDB Atlas** (database
 | API | [ddhruvui/ResearchGateBE](https://github.com/ddhruvui/ResearchGateBE) | Vercel serverless function |
 | Data | this repo, `src/publish_mongo.py` | MongoDB Atlas, db `ResearchGate` |
 
-Fill these in once deployed (the `dashboard` skill reads them from here):
+Deployed URLs (the `dashboard` skill reads them from here):
 
-- API: `https://<vercel-project>.vercel.app`
-- UI: `https://<render-site>.onrender.com`
+- API: `https://research-gate-be.vercel.app` — try `https://research-gate-be.vercel.app/api/health`
+- UI: `https://<render-site>.onrender.com` — fill in once the Render site exists
 
 > **Open the dashboard and tell me what it says.**
 
