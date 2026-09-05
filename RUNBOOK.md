@@ -35,6 +35,8 @@ forecast is written once and never regenerated.
 > We have data for &lt;DATE&gt;. Grade it, then show me tomorrow's predictions with
 > today's close and the expected value.
 
+> Run the daily for &lt;DATE&gt; and confirm the dashboard shows it.
+
 ---
 
 ## Full rebuild (only when a model setting changes)
@@ -72,6 +74,9 @@ up to `results/backup/` first. Do not run it casually.
 
 > Re-run the backtest but only 10 tickers first, so I can sanity-check before
 > committing 3.5 hours.
+
+> The rebuild finished — merge it, publish it, and confirm the dashboard switched
+> to the new run.
 
 ---
 
