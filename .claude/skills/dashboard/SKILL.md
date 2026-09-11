@@ -59,6 +59,17 @@ Idempotent — graded rows are locked, so it appends only what Mongo lacks. Afte
 rebuild add `--full` (`src.merge` already does). Then re-check §1; allow two
 minutes for the API and edge caches to expire.
 
+The bottom card, **"$10,000 in each stock, with a stop loss"**, is fed separately
+by `latest/strategy.json` (`/api/strategy`). If that card is missing or behind
+while the rest of the page is current, recompute it first and then republish:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.publish_mongo'
+```
+
+`src.strategy` is a pure reader of `latest/predictions.parquet` — it cannot
+change a prediction, a grade or a metric, so it is always safe to re-run.
+
 `MONGO_URI` / `DB_PASSWORD` / `MONGO_DB` come from `.env` (gitignored). The pod
 gets the same three keys through `scripts/launch.sh`, so a daily run publishes on
 its own; the pod log shows `publishing latest/ to MongoDB` and the `[publish]`

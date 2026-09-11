@@ -170,8 +170,12 @@ are on the volume — publish them by hand, reading S3 and writing Mongo with
 nothing saved locally:
 
 ```bash
-bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo --full'
+bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.publish_mongo --full'
 ```
+
+`src.merge` runs `src.strategy` itself just before publishing, because a rebuild
+replaces every prediction and the $10k stop-loss paper trade is computed from
+them. Re-run it by hand as above whenever you publish a rebuild by hand.
 
 `--full` matters here: without it the publisher would only append rows it does
 not have and leave the old run's rows in place under the same run id (a

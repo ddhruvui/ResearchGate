@@ -117,9 +117,10 @@ self-terminates, which is what the loop waits for.
 
 ## 6. Verify on the dashboard and report
 
-The pod publishes `latest/` to MongoDB itself (`scripts/bootstrap.sh` →
-`python -m src.publish_mongo`), so the deployed UI has the run a couple of
-minutes after `run exit=0`. Verify there — nothing needs downloading:
+The pod refreshes the stop-loss paper trade and publishes `latest/` to MongoDB
+itself (`scripts/bootstrap.sh` → `python -m src.strategy` → `python -m
+src.publish_mongo`), so the deployed UI has the run a couple of minutes after
+`run exit=0`. Verify there — nothing needs downloading:
 
 ```bash
 API=https://research-gate-be.vercel.app
@@ -132,6 +133,12 @@ print('live-only n=%s acc=%.4f edge=%+.4f' % (lo.get('n'), lo.get('direction_acc
 curl -s --max-time 20 "$API/api/next-session" | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 print(f'next: {len(d[\"rows\"])} rows for {d[\"forSession\"]}, {d[\"up\"]} up / {d[\"down\"]} down')"
+curl -s --max-time 20 "$API/api/strategy" | python3 -c "
+import json,sys; d=json.load(sys.stdin); r=d['rollup']
+print('stop-loss:', d['meta']['stamp'], '|', r['nTickers'], 'tickers,', r['startCapital'], 'each')
+for k,b in sorted(r['byStop'].items()):
+    print('  %s stop -> %s (%+.1f%%), %s of %s tickers ahead' % (
+        k, format(b['end'], ',.2f'), b['totalReturn']*100, b['winners'], r['nTickers']))"
 ```
 
 `forSession` must be the session after the bar that just landed, `bySource.live`
@@ -145,8 +152,13 @@ on the volume. Publish them from here — this reads S3 and writes Mongo without
 saving anything locally:
 
 ```bash
-bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo'
+bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.publish_mongo'
 ```
+
+`src.strategy` only reads `latest/predictions.parquet`, so re-running it can
+never disturb a grade or a metric. Its `meta.stamp` should be from this run; if
+`/api/strategy` 404s or its stamp is old while `/api/summary` is current, that
+step is what failed.
 
 Report: rows graded, live-row count, the next session's date and up/down split,
 and that the dashboard shows it.

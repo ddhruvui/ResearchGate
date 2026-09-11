@@ -18,6 +18,10 @@ Collections written, in database MONGO_DB:
                   cost level the UI offers, so the API never scans 220k rows per hit.
     next_session  _id = "<run_id>:<ticker>". The current ungraded guess per ticker.
     predictions   _id = "<run_id>:<ticker>:<date>". Every graded row, as scored.
+    strategy      _id = "<run_id>:<ticker>". The stop-loss paper trade from
+                  src/strategy.py: per-stop summary, the daily balance series and
+                  tomorrow's pending plan. Absent when strategy.json has not been
+                  written, which is not an error — the rest still publishes.
 
 Graded verdicts are locked upstream, so a daily publish only inserts rows Mongo
 does not have yet. A rebuild changes the old rows too; src.merge passes full=True,
@@ -91,7 +95,8 @@ def _read_all(get):
             return None
 
     return (metrics, preds, opt_parquet("next_session.parquet"),
-            opt_json("run_meta.json"), opt_json("ticker_info.json"))
+            opt_json("run_meta.json"), opt_json("ticker_info.json"),
+            opt_json("strategy.json"))
 
 
 def load_from_s3(env: Env, base: str):
@@ -272,7 +277,16 @@ def fingerprint(preds: pd.DataFrame, upto: str | None) -> str:
 
 # -------------------------------------------------------------------------- build
 
-def build(metrics, preds, ns, run_meta, ticker_info, run_id, origin) -> dict:
+def strategy_docs(strategy: dict | None, run_id: str) -> list[dict]:
+    """One document per ticker. The balance series is what the UI charts, so it
+    is stored whole rather than recomputed on read."""
+    if not strategy or not isinstance(strategy.get("tickers"), list):
+        return []
+    return [{"_id": f"{run_id}:{t['ticker']}", "run_id": run_id, **t}
+            for t in strategy["tickers"] if t.get("ticker")]
+
+
+def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin) -> dict:
     rows = ui_rows(preds)
     by_source: dict[str, int] = {}
     for r in rows:
@@ -288,6 +302,7 @@ def build(metrics, preds, ns, run_meta, ticker_info, run_id, origin) -> dict:
     }
     equity = {c: equity_curve(rows, c) for c in COSTS_BPS}
     nxt = next_session_rows(ns)
+    strat = strategy_docs(strategy, run_id)
 
     pdocs = preds.copy()
     pdocs["date"] = _iso(pdocs["date"])
@@ -302,6 +317,7 @@ def build(metrics, preds, ns, run_meta, ticker_info, run_id, origin) -> dict:
         "tickers": ticker_table(metrics),
         "equity": equity,
         "next_session": nxt,
+        "strategy": strat,
         "predictions": _records(pdocs),
         "max_date": max_date,
         "run_doc": {
@@ -321,6 +337,8 @@ def build(metrics, preds, ns, run_meta, ticker_info, run_id, origin) -> dict:
             "tickers": ticker_table(metrics),
             "run_meta": run_meta,
             "ticker_info": ticker_info,
+            "strategy": ({"meta": strategy.get("meta"), "rollup": strategy.get("rollup")}
+                         if strategy else None),
         },
     }
 
@@ -337,6 +355,7 @@ def ensure_indexes(db) -> None:
                                    name="run_source_date")
     db["next_session"].create_index([("run_id", ASCENDING), ("pred", ASCENDING)], name="run_pred")
     db["equity"].create_index([("run_id", ASCENDING)], name="run")
+    db["strategy"].create_index([("run_id", ASCENDING), ("ticker", ASCENDING)], name="run_ticker")
 
 
 def write_predictions(db, run_id: str, docs: list[dict], full: bool, preds: pd.DataFrame) -> tuple[int, str]:
@@ -383,6 +402,18 @@ def write_all(db, b: dict, full: bool, preds: pd.DataFrame) -> dict:
     ops.append(DeleteMany({"run_id": run_id, "_id": {"$nin": keep}}))
     db["next_session"].bulk_write(ops, ordered=True)
 
+    # Replace the run's strategy docs wholesale: unlike a graded prediction, a
+    # balance series is recomputed end-to-end every time, so there is nothing to
+    # append to. Skipped entirely when strategy.json was absent, which leaves any
+    # previously published strategy in place rather than deleting it.
+    n_strat = 0
+    if b["strategy"]:
+        ops = [ReplaceOne({"_id": d["_id"]}, d, upsert=True) for d in b["strategy"]]
+        keep = [d["_id"] for d in b["strategy"]]
+        ops.append(DeleteMany({"run_id": run_id, "_id": {"$nin": keep}}))
+        db["strategy"].bulk_write(ops, ordered=True)
+        n_strat = len(b["strategy"])
+
     doc = dict(b["run_doc"])
     doc["published_at"] = datetime.now(timezone.utc).isoformat()
     doc["fingerprint"] = fingerprint(preds, None)
@@ -391,6 +422,7 @@ def write_all(db, b: dict, full: bool, preds: pd.DataFrame) -> dict:
 
     return {"predictions": n_pred, "mode": mode, "in_mongo": doc["predictions_in_mongo"],
             "next_session": len(b["next_session"]), "equity_curves": len(b["equity"]),
+            "strategy": n_strat,
             "published_at": doc["published_at"], "secs": round(time.time() - t0, 1)}
 
 
@@ -409,13 +441,14 @@ def publish(*, full: bool = False, from_dir: str | None = None, config: str | No
     base = f"{cfg.get('output', {}).get('prefix', 'runs')}/{run_id}"
 
     if from_dir:
-        (metrics, preds, ns, run_meta, ticker_info), origin = load_from_dir(Path(from_dir))
+        (metrics, preds, ns, run_meta, ticker_info, strategy), origin = load_from_dir(Path(from_dir))
     else:
-        (metrics, preds, ns, run_meta, ticker_info), origin = load_from_s3(Env.load(), base)
+        (metrics, preds, ns, run_meta, ticker_info, strategy), origin = load_from_s3(Env.load(), base)
     print(f"[publish] {origin}: {len(preds):,} rows, {len(ns) if ns is not None else 0} "
-          f"live guesses", flush=True)
+          f"live guesses, strategy "
+          f"{len(strategy.get('tickers', [])) if strategy else 0} tickers", flush=True)
 
-    b = build(metrics, preds, ns, run_meta, ticker_info, run_id, origin)
+    b = build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin)
     o = b["summary"]["overall"]
     print(f"[publish] overall n={o.get('n'):,} acc={o.get('direction_accuracy', 0):.4f} "
           f"edge={o.get('edge_vs_always_up', 0):+.4f}; equity@5bps "
@@ -430,7 +463,8 @@ def publish(*, full: bool = False, from_dir: str | None = None, config: str | No
     out = write_all(db, b, full, preds)
     print(f"[publish] {db.name}: predictions {out['mode']} +{out['predictions']:,} "
           f"(now {out['in_mongo']:,}), next_session {out['next_session']}, "
-          f"equity {out['equity_curves']} curves, {out['secs']}s", flush=True)
+          f"equity {out['equity_curves']} curves, strategy {out['strategy']} tickers, "
+          f"{out['secs']}s", flush=True)
     client.close()
     return out
 

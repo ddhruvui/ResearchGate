@@ -212,8 +212,53 @@ python3 -m src.publish_mongo --full     # after a rebuild: replace the run's row
 It needs `MONGO_URI`, `DB_PASSWORD` and `MONGO_DB` in `.env` (see
 `.env.example`); with them unset it prints a notice and does nothing. The
 publisher also pre-computes the equity curves for the UI's cost levels, so the
-API never scans the 220k-row `predictions` collection on a page load. See
+API never scans the 220k-row `predictions` collection on a page load, and copies
+`strategy.json` into a `strategy` collection (one document per ticker) that the
+UI's stop-loss table reads. See
 `RUNBOOK.md` for the day-to-day commands.
+
+### The stop-loss paper trade
+
+Direction accuracy answers "was the call right". `src/strategy.py` answers a
+harder question: **follow every call with $10,000 and a stop loss, and where do
+you end up?** It is a pure reader of `latest/predictions.parquet` — it never
+regrades or rewrites a prediction, and deleting everything it produces leaves
+the rest of the pipeline untouched.
+
+For each recorded call, on the session it was made for:
+
+```
+expected  = adj_close[D] * (1 + pred_return)        the model's price target
+direction = LONG if pred_return > 0 else SHORT
+```
+
+* **No trade** when the open has already passed the target (open >= expected for
+  a long, <= for a short). The predicted move happened overnight, before any
+  order could be worked; the money sits out.
+* Otherwise the **open is the entry**, and the position closes on the first of:
+  the **stop** (`entry*(1-sl)` long, `entry*(1+sl)` short), the **target**, or
+  the **close**. A day that touched both the stop and the target cannot be
+  ordered from a daily bar, so the **stop** is taken — the conservative read,
+  and the one that stops a tight stop scoring well on a tie-break.
+
+Capital compounds per ticker from $10,000 with fractional shares, and the
+balance is floored to whole cents. Stops of 2%, 5% and 8% are run side by side.
+
+Two readings of this rule are wrong by construction, and `tests/test_strategy.py`
+pins both out. Selling at the target on a gap-through day books a loss on a
+session that moved the predicted way (buy at 102, sell at the 101 target) — ~32%
+of sessions. Exiting at the day's low when the target is missed assumes you sell
+at the single worst tick, every session — another ~32%. Together they turned
+$10,000 into $0.04 over 1,428 sessions on a 10-ticker sample; the rule above
+leaves it between $6.6k and $12.6k depending on the stop.
+
+```sh
+python3 -m src.strategy                 # write latest/strategy.{parquet,json}
+python3 -m src.strategy --dry-run       # totals only, write nothing
+```
+
+It runs automatically after a daily run (`scripts/bootstrap.sh`) and after a
+rebuild (`src.merge`), before the Mongo publish that ships it.
 
 ### Cost
 
@@ -240,6 +285,7 @@ src/walkforward.py       the daily loop + the no-leak assertion
 src/metrics.py           direction, baselines, per-year
 src/run.py               entrypoint
 src/daily.py             grade -> learn -> guess, the everyday path
+src/strategy.py          the $10k-per-stock stop-loss paper trade (reads only)
 src/publish_mongo.py     latest/ -> MongoDB Atlas, for the deployed dashboard
 scripts/launch.sh        bundle -> results volume -> CPU pod -> self-terminate
 tests/                   leakage proof, model sanity, storage guards

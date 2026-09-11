@@ -139,6 +139,18 @@ Safe to repeat. Graded rows are locked, so a re-publish only appends rows Mongo
 does not have yet (seconds). After a rebuild add `--full`; `src.merge` already
 does. A first seed of 220k rows takes about three minutes.
 
+The **stop-loss table at the bottom of the dashboard** ("$10,000 in each stock")
+comes from `latest/strategy.json`, which both the pod and `src.merge` refresh
+just before they publish. If that table is missing or stale while the rest of the
+page is current, the strategy step is what failed — recompute and republish:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.publish_mongo'
+```
+
+`src.strategy` only reads `latest/predictions.parquet`; it cannot change a
+prediction, a grade or a metric, so it is always safe to re-run.
+
 A **"last published N days ago" banner** means Mongo has not been written to
 for more than five days — the daily run did not go through, or its publish step
 failed. Check the pod log for `publishing latest/ to MongoDB` and `[publish]

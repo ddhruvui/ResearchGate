@@ -96,6 +96,15 @@ def main() -> int:
     # A rebuild changes every row, so the deployed dashboard's copy is replaced
     # wholesale. Partial merges never reach latest/, so they never reach Mongo.
     if not missing:
+        # The stop-loss paper trade reads latest/predictions.parquet, which the
+        # lines above just replaced, so it is refreshed BEFORE the publish that
+        # ships it. A failure here leaves the previous strategy.json in place and
+        # never takes the rebuild down with it.
+        try:
+            from .strategy import compute as compute_strategy
+            compute_strategy()
+        except Exception as exc:
+            print(f"stop-loss strategy failed (predictions are still published): {exc}")
         try:
             from .publish_mongo import publish
             publish(full=True)

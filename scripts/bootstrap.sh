@@ -42,6 +42,14 @@ ec=$?
 echo "run exit=$ec ($([ $ec -eq 124 ] && echo 'WATCHDOG TIMEOUT' || echo exited)) $(date -u +%FT%TZ)"
 sync 2>/dev/null
 
+# Refresh the $10k stop-loss paper trade over the predictions this run just wrote.
+# It only READS latest/predictions.parquet and writes its own keys, so a failure
+# here cannot affect the run that already landed — hence no change to $ec.
+if [ "$ec" -eq 0 ] && { [ "${RUN_MODE:-both}" = "daily" ] || [ "${SHARDS:-1}" -le 1 ]; }; then
+  echo "computing stop-loss paper trade ..."
+  timeout 1800 python -m src.strategy || echo "!! strategy failed (the run itself succeeded)"
+fi
+
 # Publish latest/ to MongoDB for the deployed dashboard. Only when this pod wrote
 # latest/ itself (a daily run, or an unsharded full run); a sharded backtest is
 # merged and published from the laptop by src.merge. The run has already landed
