@@ -2,7 +2,8 @@
 
 The acquisition pipeline (DataAcquistion) publishes data/ohlcv/<T>.json and
 data/splits/<T>.json for its own universe to the read-only source volume.
-Tickers in tickers.json that it does not cover are fetched here straight from
+Tickers in tickers.json that it does not cover (and have no data.source_keys
+override pointing at another key on the source volume) are fetched here straight from
 EODHD and staged on the RESULTS volume under the same keys, where LayeredSource
 picks them up. The source volume is never touched.
 
@@ -77,6 +78,7 @@ def main() -> int:
 
     want = load_tickers(cfg)
     have = _source_tickers(src, prefix)
+    have |= set(cfg["data"].get("source_keys") or {})   # filed elsewhere on the source volume
     ext = [t for t in want if t not in have]
     print(f"universe {len(want)} | on source volume {len(want) - len(ext)} | "
           f"to stage on {dst.bucket}: {len(ext)}", flush=True)

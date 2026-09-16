@@ -10,6 +10,9 @@ data:
   splits_prefix: data/splits      #   data/<TICKER>.json on 2026-09-16, DataAcquistion 8a84a38);
                                   #   tickers the acquisition doesn't cover are staged under
                                   #   the same keys on the RESULTS volume (src/fetch_ext.py)
+  source_keys:                    # per-ticker override of <source_prefix>/<TICKER>.json for
+    SPY: data/watchlist/market/SPY.US.json   # names the acquisition files elsewhere; same
+    QQQ: data/watchlist/market/QQQ.US.json   # row schema. Counted as covered by fetch_ext.
 
 backtest:
   start: "2021-01-04"             # first GRADED prediction

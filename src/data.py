@@ -22,6 +22,13 @@ from .storage import SourceStore
 _COLS = ["date", "open", "high", "low", "close", "adjusted_close", "volume"]
 
 
+def source_key(cfg: dict, ticker: str) -> str:
+    """Key of a ticker's EOD file: <source_prefix>/<T>.json unless data.source_keys
+    overrides it (e.g. the ETFs the acquisition files under data/watchlist/market/)."""
+    override = (cfg["data"].get("source_keys") or {}).get(ticker)
+    return override or f"{cfg['data']['source_prefix']}/{ticker}.json"
+
+
 def _split_ratio(raw) -> float | None:
     """'4.000000/1.000000' -> 4.0 ; also tolerates a bare number."""
     if raw is None:
@@ -58,7 +65,7 @@ def split_volume_factor(splits: list | None, dates: pd.DatetimeIndex) -> np.ndar
 
 def load_adjusted(source: SourceStore, ticker: str, cfg: dict) -> pd.DataFrame:
     """Return a date-sorted adjusted OHLCV frame for one ticker. Read-only on source."""
-    key = f"{cfg['data']['source_prefix']}/{ticker}.json"
+    key = source_key(cfg, ticker)
     rows = source.get_json(key)
     df = pd.DataFrame(rows)
     missing = [c for c in _COLS if c not in df.columns]
