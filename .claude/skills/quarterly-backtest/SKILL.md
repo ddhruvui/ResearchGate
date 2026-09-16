@@ -1,14 +1,14 @@
 ---
 name: quarterly-backtest
-description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 167 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~4-6 hours. Not for everyday operation — use daily-run for that.
+description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 105 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~3.5-4 hours. Not for everyday operation — use daily-run for that.
 ---
 
 # Quarterly backtest (full rebuild)
 
-Replays every session from 2021-01-04 to the latest bar for all 167 tickers,
-re-tuning PSO at each quarter boundary on trailing data only. **~4–6 hours**,
-**~$15–20**, 20 parallel pods. (Was ~3.5 h/$12 at 100 tickers; the 67 adds are
-mostly shorter histories, so cost grows less than linearly.)
+Replays every session from 2021-01-04 to the latest bar for all 105 tickers,
+re-tuning PSO at each quarter boundary on trailing data only. **~3.5–4 hours**,
+**~$12–15**, 20 parallel pods. (Measured ~3.5 h/$12 at 100 tickers and ~4–6 h/
+$15–20 at 167; the 105-name universe set on 2026-09-16 is close to the former.)
 
 Working directory is the repo root.
 
@@ -143,7 +143,7 @@ It **refuses to publish partial results** to `latest/` (exit 2) — that guard i
 deliberate, since a reader cannot tell 80 tickers from 100 once published. To
 get an early read, `--allow-partial` routes to `latest_partial/` instead.
 
-The merge rescores **globally** across all 167 tickers, so accuracy and baselines
+The merge rescores **globally** across all 105 tickers, so accuracy and baselines
 are not averages of per-shard averages.
 
 It then **publishes to MongoDB itself** (`src.merge` → `publish(full=True)`):

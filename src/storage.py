@@ -82,7 +82,7 @@ class LayeredSource:
     The acquisition pipeline only publishes its own universe to the source
     volume, and the source volume is never written from here. Tickers outside
     that universe are staged by `python -m src.fetch_ext` on the RESULTS volume
-    under identical keys (data/<T>.json, data/splits/<T>.json); this class makes
+    under identical keys (data/ohlcv/<T>.json, data/splits/<T>.json); this class makes
     the two buckets read as one dataset. Like SourceStore it exposes no write
     methods.
     """

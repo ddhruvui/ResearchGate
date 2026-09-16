@@ -6,13 +6,14 @@ description: Run and monitor the everyday PSO+LS-SVM pipeline — grade yesterda
 # Daily run
 
 One pass: **grade → learn → guess**. Never replays history. ~1 min of compute for
-167 tickers; the slow part is placing a pod.
+105 tickers; the slow part is placing a pod.
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
 
 ## 0. Refresh the staged ext tickers
 
-31 of the 167 tickers are outside the acquisition pipeline's universe; their
+Some of the 105 tickers are outside the acquisition pipeline's universe (SPY and
+QQQ at least; `python3 -m src.fetch_ext --dry-run` lists them); their
 bars are staged on the results volume by `src/fetch_ext.py` and do NOT update
 nightly on their own. Refresh them first, or their stored predictions never
 grade:
@@ -51,7 +52,7 @@ import pandas as pd; d=pd.read_parquet('/tmp/ns.parquet')
 print(f'{len(d)} stored guesses, as_of {d[\"as_of\"].astype(str).unique()[0]} -> for {d[\"for_session\"].astype(str).unique()[0]}')"
 ```
 
-**If this shows fewer than 167 rows, stop.** A partial file means a limited run
+**If this shows fewer than 105 rows, stop.** A partial file means a limited run
 overwrote it. Restore with `python3 -m src.merge --shards 20` before continuing.
 
 ## 3. Check nothing is already running
@@ -112,7 +113,7 @@ Substitute the real pod id for `POD_ID`. The grep must cover failure signatures
 (`Killed`, `Traceback`), not just the happy path — silence otherwise looks
 identical to a crash. `run exit=0` is not the end: the pod then publishes
 `latest/` to MongoDB for the dashboard (`publishing latest/ to MongoDB` …
-`[publish] ResearchGate: predictions appended +164 …`) and only then
+`[publish] ResearchGate: predictions appended +105 …`) and only then
 self-terminates, which is what the loop waits for.
 
 ## 6. Verify on the dashboard and report
@@ -164,8 +165,8 @@ Report: rows graded, live-row count, the next session's date and up/down split,
 and that the dashboard shows it.
 
 **Always caveat the live-only accuracy.** It is computed over very few sessions,
-and same-day predictions across 167 stocks are ~2–6 independent observations,
-not 167 — measured cross-sectional correlation is 0.08–0.25. It swings by tens
+and same-day predictions across 105 stocks are ~2–6 independent observations,
+not 105 — measured cross-sectional correlation is 0.08–0.25. It swings by tens
 of points for weeks. Quote the backtest figure (currently **−1.4pp edge over the
 always-up baseline**) as the real number, and say plainly that the live figure
 means nothing yet.
@@ -174,10 +175,10 @@ means nothing yet.
 
 | Log line | Meaning |
 |---|---|
-| `graded 167 · new guesses 167 · errors 0` | success |
+| `graded 105 · new guesses 105 · errors 0` | success |
 | `nothing to do` | already processed, or vendor has not published. Correct, not a failure |
 | `run exit=137` | OOM. Should not recur (worker count is cgroup-aware), but report it |
-| `[publish] ResearchGate: predictions appended +164 …` | the dashboard has the run |
+| `[publish] ResearchGate: predictions appended +105 …` | the dashboard has the run |
 | `[publish] FAILED: …` | run succeeded, dashboard stale — republish from the laptop (step 6). `ServerSelectionTimeoutError` from the pod usually means Atlas Network Access does not allow it |
 | no `publishing latest/` line after `run exit=0` | `MONGO_URI` was empty in `.env` at launch — republish from the laptop |
-| `to grade : <167` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like (step 0 skipped) |
+| `to grade : <105` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like (step 0 skipped) |

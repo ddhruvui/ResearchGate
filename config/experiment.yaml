@@ -5,10 +5,11 @@
 run_id: pso_lssvm_v1
 
 data:
-  tickers_file: tickers.json      # 167 names (S&P top-100 + watchlist adds), this repo
-  source_prefix: data             # <SOURCE_VOLUME>/data/<TICKER>.json; tickers the
-  splits_prefix: data/splits      #   acquisition doesn't cover are staged under the
-                                  #   same keys on the RESULTS volume (src/fetch_ext.py)
+  tickers_file: tickers.json      # 105 names (hand-picked 2026-09-16), this repo
+  source_prefix: data/ohlcv       # <SOURCE_VOLUME>/data/ohlcv/<TICKER>.json (moved from
+  splits_prefix: data/splits      #   data/<TICKER>.json on 2026-09-16, DataAcquistion 8a84a38);
+                                  #   tickers the acquisition doesn't cover are staged under
+                                  #   the same keys on the RESULTS volume (src/fetch_ext.py)
 
 backtest:
   start: "2021-01-04"             # first GRADED prediction

@@ -127,5 +127,5 @@ the backtest. Read the exact current value off `edge_vs_always_up` in
 accumulate into the pooled total.
 
 The live-only figure on the next-session panel is computed over a handful of
-sessions, and 164 same-day predictions across correlated names are worth ~2–6
+sessions, and 105 same-day predictions across correlated names are worth ~2–6
 independent observations. Say plainly that it means nothing yet.

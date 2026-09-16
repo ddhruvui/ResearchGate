@@ -1,6 +1,6 @@
 """Stage vendor files for tickers OUTSIDE the acquisition pipeline's universe.
 
-The acquisition pipeline (InvestOpediaClaude) publishes data/<T>.json and
+The acquisition pipeline (DataAcquistion) publishes data/ohlcv/<T>.json and
 data/splits/<T>.json for its own universe to the read-only source volume.
 Tickers in tickers.json that it does not cover are fetched here straight from
 EODHD and staged on the RESULTS volume under the same keys, where LayeredSource
