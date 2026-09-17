@@ -10,26 +10,25 @@ One pass: **grade → learn → guess**. Never replays history. ~1 min of comput
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
 
-## 0. Refresh the staged ext tickers
+## 0. Ext tickers — nothing to stage for the current universe
 
-Some of the 105 tickers are outside the acquisition pipeline's universe (SPY and
-QQQ at least; `python3 -m src.fetch_ext --dry-run` lists them); their
-bars are staged under `results/ResearchGate/` by `src/fetch_ext.py` and do NOT update
-nightly on their own. Refresh them first, or their stored predictions never
-grade:
-
-```bash
-cd /Users/dhruvdesai/Development/ResearchGate
-bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'
-```
+All 105 tickers are on the source volume: 103 under `data/ohlcv/`, SPY and QQQ
+through the `data.source_keys` override in `config/experiment.yaml`
+(`python3 -m src.fetch_ext` reported `to stage: 0` on 2026-09-16). Skip this
+step. Only if `tickers.json` gains a name the acquisition pipeline does not
+publish, stage it first with
+`bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'` — staged bars do
+not refresh on their own, so from then on this step runs before every daily.
 
 ## 1. Confirm the new bar actually landed
 
 Do not skip this. The run is a no-op without it, and you will waste a pod.
+Bars are published by the DataAcquistion repo to `data/ohlcv/<T>.json` on
+`crimtr8kbf`; read them through this repo's `_common.sh` (read-only `$SRC_BUCKET`):
 
 ```bash
-cd /Users/dhruvdesai/Development/InvestOpediaClaude/data_acquisition && bash -c 'set +e; . scripts/_common.sh; set +e
-for t in AAPL MSFT AVGO; do aws s3 cp $S3FLAGS "$BUCKET/data/$t.json" /tmp/chk_$t.json --quiet; done
+cd /Users/dhruvdesai/Development/ResearchGate && bash -c 'set +e; . scripts/_common.sh; set +e
+for t in AAPL MSFT AVGO; do aws s3 cp $S3FLAGS "$SRC_BUCKET/data/ohlcv/$t.json" /tmp/chk_$t.json --quiet; done
 python3 -c "
 import json
 for t in (\"AAPL\",\"MSFT\",\"AVGO\"):
@@ -54,6 +53,11 @@ print(f'{len(d)} stored guesses, as_of {d[\"as_of\"].astype(str).unique()[0]} ->
 
 **If this shows fewer than 105 rows, stop.** A partial file means a limited run
 overwrote it. Restore with `python3 -m src.merge --shards 20` before continuing.
+
+**If the file does not exist at all, stop.** No rebuild has merged (e.g. after a
+results wipe), so there is nothing to grade and `src.daily` would exit 1 with
+`no prior predictions.parquet; run a full backtest first`. Tell the user a
+`/quarterly-backtest` is needed first — do not launch.
 
 ## 3. Check nothing is already running
 
@@ -114,7 +118,22 @@ Substitute the real pod id for `POD_ID`. The grep must cover failure signatures
 identical to a crash. `run exit=0` is not the end: the pod then publishes
 `latest/` to MongoDB for the dashboard (`publishing latest/ to MongoDB` …
 `[publish] ResearchGate: predictions appended +105 …`) and only then
-self-terminates, which is what the loop waits for.
+tries to self-terminate, which is what the loop waits for.
+
+**Then delete the pod from the laptop.** Since 2026-09-09 the pod's own DELETE
+gets HTTP 403 every time, so the log ends in `!! TERMINATION NOT CONFIRMED` and the
+pod stays up, idling and billing (`bootstrap.sh` deliberately sleeps rather than
+exits there — an exited container is restarted by RunPod and re-runs the whole
+job). Once the publish line is in the log you do not need to wait out the retries:
+
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate && bash -c 'set +e; . scripts/_common.sh; set +e
+curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE https://rest.runpod.io/v1/pods/POD_ID -H "Authorization: Bearer $RUNPOD_API_KEY"
+curl -sS --max-time 25 https://rest.runpod.io/v1/pods -H "Authorization: Bearer $RUNPOD_API_KEY" \
+ | python3 -c "import json,sys; print([x[\"name\"] for x in json.load(sys.stdin)] or \"none\")"'
+```
+
+Expect `204` and `none`.
 
 ## 6. Verify on the dashboard and report
 
@@ -167,9 +186,10 @@ and that the dashboard shows it.
 **Always caveat the live-only accuracy.** It is computed over very few sessions,
 and same-day predictions across 105 stocks are ~2–6 independent observations,
 not 105 — measured cross-sectional correlation is 0.08–0.25. It swings by tens
-of points for weeks. Quote the backtest figure (currently **−1.4pp edge over the
-always-up baseline**) as the real number, and say plainly that the live figure
-means nothing yet.
+of points for weeks. Quote the backtest figure (currently **−1.0pp edge over the
+always-up baseline** — 50.88% vs 51.89%, 105-ticker rebuild through the
+2026-09-16 bar) as the real number, and say plainly that the live figure means
+nothing yet.
 
 ## Expected outcomes
 
@@ -181,4 +201,6 @@ means nothing yet.
 | `[publish] ResearchGate: predictions appended +105 …` | the dashboard has the run |
 | `[publish] FAILED: …` | run succeeded, dashboard stale — republish from the laptop (step 6). `ServerSelectionTimeoutError` from the pod usually means Atlas Network Access does not allow it |
 | no `publishing latest/` line after `run exit=0` | `MONGO_URI` was empty in `.env` at launch — republish from the laptop |
-| `to grade : <105` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like (step 0 skipped) |
+| `to grade : <105` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like, if any are ever staged again (step 0) |
+| `no prior predictions.parquet … run a full backtest first` | no rebuild has merged — step 2 should have caught it; run `/quarterly-backtest` |
+| `!! TERMINATION NOT CONFIRMED` | pod could not delete itself (403) and is still billing — delete it from the laptop (step 5) |

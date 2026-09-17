@@ -1,14 +1,18 @@
 ---
 name: quarterly-backtest
-description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 105 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~3.5-4 hours. Not for everyday operation — use daily-run for that.
+description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 105 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~30 minutes end to end. Not for everyday operation — use daily-run for that.
 ---
 
 # Quarterly backtest (full rebuild)
 
 Replays every session from 2021-01-04 to the latest bar for all 105 tickers,
-re-tuning PSO at each quarter boundary on trailing data only. **~3.5–4 hours**,
-**~$12–15**, 20 parallel pods. (Measured ~3.5 h/$12 at 100 tickers and ~4–6 h/
-$15–20 at 167; the 105-name universe set on 2026-09-16 is close to the former.)
+re-tuning PSO at each quarter boundary on trailing data only. **~30 minutes end
+to end, ~$2–3**, 20 parallel pods — *if every pod is deleted as soon as its shard
+lands* (step 4). Measured 2026-09-17 (105 tickers through the 9/16 bar, all 20
+placed at 16 vCPU / $0.48/hr): launch ~6 min (serial startup checks), each
+shard's run 5–11 min, all 20 written 15 min after the first pod booted, merge +
+Mongo publish ~4 min. Older figures (~3.5–6 h, $12–20) were at 100–167 tickers on
+smaller placements; a shard that falls back to 2–4 vCPU will be several times slower.
 
 Working directory is the repo root.
 
@@ -68,9 +72,12 @@ cd /Users/dhruvdesai/Development/ResearchGate
 bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'
 ```
 
-Every staged ticker must report its last bar at the same date the source volume
-carries (compare with AAPL). Failures list at the bottom — do not launch with
-failures outstanding.
+For the current 105-name universe this prints
+`universe 105 | on source volume 105 | to stage …: 0` — every name is on the
+source volume (SPY/QQQ via `data.source_keys`) and nothing is fetched. If it
+ever stages names, every staged ticker must report its last bar at the same date
+the source volume carries (compare with AAPL); do not launch with failures
+outstanding.
 
 ## 3. Launch 20 shards
 
@@ -79,14 +86,18 @@ cd /Users/dhruvdesai/Development/ResearchGate
 SHARDS=20 WATCHDOG_SEC=43200 bash scripts/launch.sh 2>&1 | grep -E "launched|placed at|no capacity at 2|all pods|some pods" | tail -25
 ```
 
-20 shards × 8–9 tickers keeps each pod under the 12 h watchdog (quarterly
-re-tuning is ~8× the cost of tuning once: 1,415 walk-forward fits **plus 24 × 620
-PSO fits** per ticker — and many of the 67 added tickers have far shorter
-histories). Tickers are strided (`tickers[k::20]`) so history lengths balance
-across shards.
+20 shards × 5–6 tickers (quarterly re-tuning is ~8× the cost of tuning once:
+~1,430 walk-forward fits **plus 24 × 620 PSO fits** per ticker). The 12 h watchdog
+is a backstop, not a budget. Tickers are strided (`tickers[k::20]`) so history
+lengths balance across shards.
 
-Expect only some to place — EU-RO-1 capacity is usually tight. Note which are
-missing and start the retry loop:
+Each pod unpacks the code bundle onto its own container disk
+(`/opt/researchgate/app`). It must never unpack onto the shared volume: with one
+volume-wide `app/`, every pod's startup `rm -rf` deleted `src/` from under the
+pods placed seconds earlier (`No module named 'src'` on several shards at once).
+
+EU-RO-1 capacity is often tight (on 2026-09-17 all 20 placed first try). If some
+did not place, note which and start the retry loop:
 
 ```bash
 cd /Users/dhruvdesai/Development/ResearchGate
@@ -97,38 +108,63 @@ SHARDS=20 SHARD_LIST="4 5 6 7" TRIES=80 INTERVAL=180 WATCHDOG_SEC=43200 \
 It skips shards that are already running **or already finished**, so it is safe
 to leave going.
 
-## 4. Monitor
+## 4. Monitor — and delete each pod as its shard lands
 
-Wrap in `bash -c` — zsh will not word-split `$AWSF` and every aws call fails
-silently, reporting 0 shards done while results sit on the volume.
+**Pods do not go away on their own.** Their self-terminate DELETE gets HTTP 403
+(every run since 2026-09-09), so a finished pod stays up and bills. `bootstrap.sh`
+then deliberately idles (`sleep infinity`) instead of exiting: an exited container
+is restarted by RunPod and **re-runs the whole shard**, rewriting `latest/` each
+pass (2026-09-17: 18 pods re-ran 2–4 times before being deleted). So the monitor
+deletes each pod from the laptop once its shard's `latest/metrics.json` exists and
+its log shows `run exit=0`, and flags failure signatures in every live pod's log.
+
+Wrap in `bash -c` — zsh will not word-split `$S3FLAGS` and every aws call fails
+silently, reporting 0 shards done while results sit on the volume. Keep the aws
+timeouts: without them one hung call froze a monitor for 30 minutes while
+finished pods billed.
 
 ```bash
 bash -c '
 cd /Users/dhruvdesai/Development/ResearchGate
-set +e
-export AWS_ACCESS_KEY_ID=$(grep "^AWS_ACCESS_KEY_ID=" .env | cut -d= -f2-)
-export AWS_SECRET_ACCESS_KEY=$(grep "^AWS_SECRET_ACCESS_KEY=" .env | cut -d= -f2-)
-KEYF=$(grep "^RUNPOD_API_KEY=" .env | cut -d= -f2-)
-AWSF="--region eu-ro-1 --endpoint-url https://s3api-eu-ro-1.runpod.io"
-prev=""
+set +e; . scripts/_common.sh; set +e +u +o pipefail
+AWSX="$S3FLAGS --cli-connect-timeout 15 --cli-read-timeout 60"
+SH="$DST_ROOT/runs/pso_lssvm_v1/shards/20"
+prev=""; seen=" "
 while true; do
-  n=$(aws s3 ls $AWSF s3://crimtr8kbf/results/ResearchGate/runs/pso_lssvm_v1/shards/20/ --recursive 2>/dev/null | grep -c "latest/metrics.json")
-  alive=$(curl -sS --max-time 20 https://rest.runpod.io/v1/pods -H "Authorization: Bearer $KEYF" 2>/dev/null | grep -c "researchgate-pso-lssvm")
-  line="shards ${n:-0}/20 | pods ${alive:-0}"
-  [ "$line" != "$prev" ] && { echo "$line"; prev="$line"; }
-  [ "${n:-0}" -ge 20 ] && { echo "ALL 20 COMPLETE"; exit 0; }
-  [ "${alive:-0}" -eq 0 ] && { echo "no pods left at ${n:-0}/20"; exit 0; }
-  sleep 420
+  done_list=" $(aws s3 ls $AWSX "$SH/" --recursive 2>/dev/null | grep "latest/metrics.json" | sed "s|.*/shards/20/||;s|/latest.*||;s/^0//" | tr "\n" " ") "
+  pods=$(curl -sS --max-time 25 https://rest.runpod.io/v1/pods -H "Authorization: Bearer $RUNPOD_API_KEY" 2>/dev/null \
+    | python3 -c "import json,sys
+try: print(\"\n\".join(x[\"name\"].rsplit(\"-s\",1)[1]+\" \"+x[\"id\"] for x in json.load(sys.stdin) if (x.get(\"name\") or \"\").startswith(\"researchgate-pso-lssvm-s\")))
+except Exception: print(\"ERR\")")
+  [ "$pods" = "ERR" ] && { sleep 60; continue; }
+  logs=$(aws s3 ls $AWSX "$DST_ROOT/_pod_logs/" 2>/dev/null)
+  while read -r s id; do
+    [ -z "$id" ] && continue
+    k=$(printf "%s\n" "$logs" | grep -- "-$id.log" | awk "{print \$4}" | tail -1); [ -z "$k" ] && continue
+    aws s3 cp $AWSX "$DST_ROOT/_pod_logs/$k" /tmp/qb_s$s.log --quiet 2>/dev/null
+    bad=$(grep -m1 -E "Traceback|No module|Killed|MemoryError|run exit=[1-9]|WATCHDOG TIMEOUT|!! bundle|!! pip" /tmp/qb_s$s.log)
+    [ -n "$bad" ] && case "$seen" in *" F$s "*) ;; *) echo "FAIL s$s ($id): $bad"; seen="$seen F$s ";; esac
+    case "$done_list" in *" $s "*) grep -q "run exit=0" /tmp/qb_s$s.log && {
+      code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 -X DELETE https://rest.runpod.io/v1/pods/$id -H "Authorization: Bearer $RUNPOD_API_KEY")
+      case "$seen" in *" D$s "*) ;; *) echo "s$s done -> deleted pod $id (HTTP $code)"; seen="$seen D$s ";; esac; } ;; esac
+  done <<< "$pods"
+  n=$(printf "%s" "$done_list" | wc -w | tr -d " "); alive=$(printf "%s" "$pods" | grep -c .)
+  line="shards $n/20 | pods $alive"; [ "$line" != "$prev" ] && { echo "$line"; prev="$line"; }
+  [ "$n" -ge 20 ] && [ "$alive" -eq 0 ] && { echo "ALL 20 COMPLETE, no pods left"; exit 0; }
+  [ "$n" -lt 20 ] && [ "$alive" -eq 0 ] && { echo "no pods left at $n/20 — relaunch the missing shards"; exit 0; }
+  sleep 120
 done'
 ```
 
-Use `persistent: true` — the run outlasts the 1-hour monitor cap.
+The Monitor tool caps a watch at 30 minutes; a healthy run fits, otherwise re-arm
+it (the loop is stateless apart from not repeating its own lines).
 
-Pods **vanishing is success**, not failure: each self-terminates after writing.
-Do not read a shrinking pod count as pods dying.
+On a `FAIL` line, the failed pod is also idling and billing: delete it
+(`DELETE https://rest.runpod.io/v1/pods/<id>`), fix the cause, and relaunch just
+that shard with `retry_shards.sh` (`SHARD_LIST="<k>"`).
 
-Shard pace varies a lot (7–44 min/ticker) depending on how many quarters its
-tickers span. One straggler holding up the last hour is normal.
+Shard pace varies with how many quarters its tickers span and with the vCPU the
+pod placed at. One straggler holding up the end is normal.
 
 ## 5. Merge
 
@@ -149,7 +185,7 @@ are not averages of per-shard averages.
 
 It then **publishes to MongoDB itself** (`src.merge` → `publish(full=True)`):
 every row of the run is replaced, because a rebuild changes old rows too, not
-just appends. Expect `[publish] ResearchGate: predictions replaced +220,929 …`
+just appends. Expect `[publish] ResearchGate: predictions replaced +147,469 …` (105 tickers through 2026-09-16)
 after `written to s3://…/latest/`; about three minutes. The `.env` sourced above
 is what supplies `MONGO_URI`.
 
@@ -188,10 +224,12 @@ not rely on it).
 Give the pooled edge over the always-up baseline, the per-year table, and the
 predicted/actual correlation, and say that the dashboard now shows the rebuild. State the baseline explicitly — accuracy alone is
 meaningless, since a coin flip is the wrong benchmark and the always-up baseline
-sits near 52.4%.
+sits near 51.9% for this universe.
 
-Current reference result: **51.00% accuracy vs 52.39% baseline, edge −1.39pp,
-correlation ~0.003, negative in every year.**
+Current reference result (105 tickers, 2021-01-04 → 2026-09-16, merged
+2026-09-17): **50.88% accuracy vs 51.89% baseline, edge −1.01pp, pred/actual
+correlation 0.003 (Spearman 0.007), negative in every year except 2022
+(+0.3pp).** The previous 164-name rebuild was 51.00% vs 52.39%, −1.39pp.
 
 ## Gotchas that have actually bitten
 
@@ -202,5 +240,8 @@ correlation ~0.003, negative in every year.**
 | `Container Disk must be <= 20` | `RUNPOD_CONTAINER_DISK_GB` above the flavor cap |
 | Pod id equals the volume id | greedy `sed` for `"id"`; parse JSON properly |
 | Finished shards relaunching | retry loop checking "running" instead of "completed" |
+| `No module named 'src'` on several shards within minutes of launch | code unpacked to one shared `app/` on the volume; each pod's `rm -rf` wiped the others' — unpack to container disk (fixed in `bootstrap.sh` 2026-09-17) |
+| Several `_pod_logs/` files per pod id, extra timestamped run dirs per shard | container exited after the 403 terminate loop and RunPod restarted it, re-running the shard — `bootstrap.sh` now idles instead; delete pods from the laptop (step 4) |
+| Monitor silent for 30 min while pods finished | an aws call hung with no read timeout — keep `--cli-read-timeout` / `--cli-connect-timeout` |
 | `[publish] FAILED: ServerSelectionTimeoutError` after the merge | Atlas unreachable or wrong `DB_PASSWORD` in `.env`; results are on the volume, republish per 5b |
 | Dashboard shows the rebuild's metrics but the daily live log is gone | expected — the wipe discards the accumulated live rows and the rebuild replaces the run; the pre-wipe copy is in `results/backup/` |
