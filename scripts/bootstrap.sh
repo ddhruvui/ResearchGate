@@ -2,7 +2,7 @@
 # Pod entrypoint. The volume crimtr8kbf is mounted at /workspace. Its data/ tree
 # is READ-ONLY market data shared with the acquisition pipeline. This script
 # writes ONLY under /workspace/$RESULTS_PREFIX (results/ResearchGate): its log,
-# the unpacked code bundle, nothing else. The python code writes through
+# nothing else (the code bundle unpacks to container disk). The python code writes through
 # src/storage.py::ResultStore, which is confined to the same prefix.
 set +e
 
@@ -24,8 +24,12 @@ exec > >(tee -a "$LOG") 2>&1
 echo "bootstrap start $(date -u +%FT%TZ) pod=${RUNPOD_POD_ID:-?}"
 python -c 'import sys; print("python", sys.version)'
 
-WORK="$RP/app"
-case "$WORK" in /workspace/results/*/app) ;; *) echo "!! refusing to rm outside results/: $WORK"; exit 1 ;; esac
+# Unpack onto this pod's own container disk, never the shared volume: every shard
+# pod runs this script, and with one volume-wide app/ each new pod's rm -rf deleted
+# src/ out from under the pods started seconds before it (2026-09-16: 20 shards
+# placed 18 s apart, several died at once with "No module named 'src'").
+WORK="/opt/researchgate/app"
+case "$WORK" in /workspace/*) echo "!! code must not unpack onto the volume: $WORK"; exit 1 ;; esac
 rm -rf "$WORK"; mkdir -p "$WORK"
 tar xzf "$RP/code/bundle.tar.gz" -C "$WORK" || { echo "!! bundle extract failed"; }
 cd "$WORK" || exit 1
@@ -99,4 +103,7 @@ PY
   echo "terminate attempt $attempt unconfirmed — retrying in 20s"; sleep 20
 done
 echo "!! TERMINATION NOT CONFIRMED — kill pod ${RUNPOD_POD_ID:-?} manually"
-sleep 30
+# Never exit here: RunPod restarts an exited container, which re-runs this whole
+# script (2026-09-16: 403'd shard pods re-ran their shard 2-4 times, rewriting
+# latest/ each pass, until deleted). Idle until the pod is deleted from the laptop.
+exec sleep infinity
