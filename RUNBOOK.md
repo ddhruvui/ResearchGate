@@ -24,7 +24,14 @@ downloaded to this machine.
 **How long:** ~40 s of compute. Most of the wait is placing a pod — EU-RO-1 is
 often out of CPU, and it retries before falling back to a GPU.
 
-**Cost:** ~$0.01 on CPU, ~$0.02 if it falls back to GPU.
+**Cost:** ~$0.01 on CPU, ~$0.02 if it falls back to GPU — *provided the pod is
+deleted once it publishes*. Pods cannot delete themselves (RunPod answers their
+DELETE with 403), so a finished pod idles and bills until the laptop deletes it;
+the skill does that as its last step.
+
+**Needs a merged rebuild.** The daily grades the forecast the last run stored. If
+`results/ResearchGate/runs/` is empty (e.g. after a results wipe) there is nothing
+to grade — run the full rebuild first.
 
 **Safe to repeat.** Running it twice does nothing the second time — a recorded
 forecast is written once and never regenerated.
@@ -50,14 +57,20 @@ Or:
 /quarterly-backtest
 ```
 
-**What happens:** clears `results/ResearchGate/runs/` on the volume, refreshes the
-staged ext tickers, replays all 105 tickers from 2021-01-04 across 20 parallel
-pods with PSO re-tuning at every quarter boundary, then merges and rescores
+**What happens:** clears `results/ResearchGate/runs/` on the volume, checks for
+ext tickers to stage (none for the current universe), replays all 105 tickers
+from 2021-01-04 across 20 parallel pods with PSO re-tuning at every quarter
+boundary, then merges and rescores
 globally and publishes the merged run to MongoDB, replacing the old run's rows
 so the dashboard switches to the rebuild. While the pods run, the dashboard
 keeps showing the previous run.
 
-**How long:** ~3.5–4 hours. **Cost:** ~$12–15.
+**How long:** ~30 minutes end to end. **Cost:** ~$2–3.
+
+Measured 2026-09-17: all 20 pods placed at 16 vCPU, each shard ran 5–11 min,
+merge and publish ~4 min. A pod that places on 2–4 vCPU is several times slower, and
+the cost only holds because the monitor deletes each pod as soon as its shard
+lands — left alone, finished pods idle and bill.
 
 **This wipes the current results**, including the accumulated live log. It backs
 up to `results/backup/` first. Do not run it casually.
@@ -74,7 +87,7 @@ up to `results/backup/` first. Do not run it casually.
 > so it matches, and tell me how it compares to rank_ic.
 
 > Re-run the backtest but only 10 tickers first, so I can sanity-check before
-> committing 3.5 hours.
+> committing the full run.
 
 > The rebuild finished — merge it, publish it, and confirm the dashboard switched
 > to the new run.
@@ -84,13 +97,13 @@ up to `results/backup/` first. Do not run it casually.
 ## Reading the output
 
 **Never quote direction accuracy on its own.** Stocks drift up, so predicting
-"up" every day is right ~52.4% of the time for free. The number that matters is
-the **edge over that baseline**.
+"up" every day is right ~51.9% of the time for free (105 tickers, 2021–2026).
+The number that matters is the **edge over that baseline**.
 
 | Figure | Current | Trust it? |
 |---|---|---|
-| Backtest edge | **−1.39pp** over 138,780 predictions | Yes |
-| Correlation with actuals | ~0.003 | Yes — this is what "no signal" looks like |
+| Backtest edge | **−1.01pp** over 147,046 predictions (50.88% vs 51.89%; negative every year but 2022) | Yes |
+| Correlation with actuals | 0.003 | Yes — this is what "no signal" looks like |
 | Live-only edge | swings wildly | **No** — see below |
 
 The live figure is computed over a handful of sessions, and 105 same-day
@@ -138,7 +151,7 @@ bash -c 'set -a; . ./.env; set +a; python3 -m src.publish_mongo'
 
 Safe to repeat. Graded rows are locked, so a re-publish only appends rows Mongo
 does not have yet (seconds). After a rebuild add `--full`; `src.merge` already
-does. A first seed of 220k rows takes about three minutes.
+does. A full seed (147k rows after the 105-ticker rebuild) takes about 2½ minutes.
 
 The **stop-loss table at the bottom of the dashboard** ("$10,000 in each stock")
 comes from `latest/strategy.json`, which both the pod and `src.merge` refresh
@@ -172,7 +185,11 @@ FAILED`, then run the daily or republish by hand.
 | Symptom | What it means | Fix |
 |---|---|---|
 | `nothing to do` | already processed, or vendor hasn't published | Not a failure. Check the source's newest bar |
-| `to grade : <105` | stored forecast file was clobbered, or staged ext tickers went stale | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh |
+| `to grade : <105` | stored forecast file was clobbered (or, if any ext tickers are ever staged again, they went stale) | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh staged names |
+| `no prior predictions.parquet … run a full backtest first` | no rebuild has merged since results were cleared | Run the full rebuild |
+| `!! TERMINATION NOT CONFIRMED`, pod still listed after the run | pod's self-delete got 403; it is idling and billing | Delete it from the laptop: `DELETE https://rest.runpod.io/v1/pods/<id>` with `RUNPOD_API_KEY` |
+| `No module named 'src'` on several shards right after launch | pods shared one unpack dir on the volume and wiped each other's code | Fixed in `scripts/bootstrap.sh` (unpacks to container disk); if it recurs, check nothing unpacks under `/workspace` |
+| Several `_pod_logs/` files for one pod id; extra run dirs per shard | a pod exited after the 403 and RunPod restarted it, re-running the job | Fixed (`bootstrap.sh` idles instead of exiting); delete the pod |
 | `run exit=137` | out of memory | Should not recur; report it if it does |
 | `no CPU or GPU capacity` | EU-RO-1 full | Retry in a few minutes; volumes are pinned to that datacenter |
 | Monitor says 0 done but results exist | zsh word-splitting bug | Monitor commands must be wrapped in `bash -c` |
