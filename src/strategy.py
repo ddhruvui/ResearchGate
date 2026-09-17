@@ -276,7 +276,7 @@ def compute(config: str | None = None, limit: int = 0, workers: int = 0,
     base = f"{cfg['output']['prefix']}/{cfg['run_id']}"
 
     def read(key):
-        return dst._s3.get_object(Bucket=dst.bucket, Key=f"{base}/latest/{key}")["Body"].read()
+        return dst.get_bytes(f"{base}/latest/{key}")
 
     try:
         preds = pd.read_parquet(io.BytesIO(read("predictions.parquet")),
@@ -302,7 +302,7 @@ def compute(config: str | None = None, limit: int = 0, workers: int = 0,
     cpus, total_gb, how = container_resources()
     workers = max(1, min(args.workers or max(1, cpus - 1), cpus, max(1, int(total_gb // 1.5))))
     print(f"read  volume : {env.source_volume}  (READ-ONLY)", flush=True)
-    print(f"write volume : {dst.bucket}", flush=True)
+    print(f"write to     : {dst.url()}", flush=True)
     print(f"tickers      : {len(tickers)}   predictions: {len(preds):,}", flush=True)
     print(f"stops        : {', '.join(f'{s:.0%}' for s in STOPS)}   "
           f"start ${START_CAPITAL:,.2f}/ticker", flush=True)
@@ -369,8 +369,8 @@ def compute(config: str | None = None, limit: int = 0, workers: int = 0,
     for pre in (f"{base}/latest", f"{base}/strategy/{stamp}"):
         dst.put_dataframe(f"{pre}/strategy.parquet", frame)
         dst.put_json(f"{pre}/strategy.json", payload)
-    print(f"\nwrote s3://{dst.bucket}/{base}/latest/strategy.parquet (+ strategy.json)")
-    print(f"      s3://{dst.bucket}/{base}/strategy/{stamp}/  (timestamped copy)")
+    print(f"\nwrote {dst.url(base)}/latest/strategy.parquet (+ strategy.json)")
+    print(f"      {dst.url(base)}/strategy/{stamp}/  (timestamped copy)")
 
     if args.local_out:
         os.makedirs(args.local_out, exist_ok=True)

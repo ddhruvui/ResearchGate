@@ -16,7 +16,8 @@ Or invoke it directly:
 
 **What happens:** grades yesterday's stored prediction against the bar that just
 landed, adds that bar to each stock's training window, records a fresh prediction
-for the next session, pushes everything to `x3n7kgbbit`, and publishes it to
+for the next session, pushes everything under `results/ResearchGate/` on the
+volume, and publishes it to
 MongoDB so the deployed dashboard shows it a couple of minutes later. Nothing is
 downloaded to this machine.
 
@@ -49,7 +50,7 @@ Or:
 /quarterly-backtest
 ```
 
-**What happens:** clears the results volume's `runs/` prefix, refreshes the
+**What happens:** clears `results/ResearchGate/runs/` on the volume, refreshes the
 staged ext tickers, replays all 105 tickers from 2021-01-04 across 20 parallel
 pods with PSO re-tuning at every quarter boundary, then merges and rescores
 globally and publishes the merged run to MongoDB, replacing the old run's rows
@@ -181,11 +182,12 @@ FAILED`, then run the daily or republish by hand.
 
 ## Hard rules
 
-- **The source volume (`crimtr8kbf`, pinned in `src/config.py`) is read-only.**
-  Market data. Never written, never deleted from. Anything extra goes on
-  `x3n7kgbbit` — including the staged ext tickers under `data/` (the names the
-  acquisition universe lacks; `python3 -m src.fetch_ext --dry-run` lists them)
-  that `python3 -m src.fetch_ext` maintains (refresh them before the daily run).
+- **`data/` on `crimtr8kbf` (pinned in `src/config.py`) is read-only.** Market
+  data, shared with the acquisition pipeline. Never written, never deleted from.
+  Everything this project writes goes under `results/ResearchGate/` on the same
+  volume (`RESULTS_PREFIX`; `$DST_ROOT` in the scripts) — including any ext
+  tickers `python3 -m src.fetch_ext` stages (none are needed for the current
+  universe; `--dry-run` lists them).
 - **A graded verdict is locked.** Prices get restated; the record does not change.
 - **Live and replayed rows are tagged** (`source` = `live` / `backtest`) so a real
   forward track record stays separable from a rehearsal.

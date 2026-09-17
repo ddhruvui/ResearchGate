@@ -35,13 +35,13 @@ curl -s --max-time 20 "$API/api/health"
 ```json
 {"ok":true,"runId":"pso_lssvm_v1","db":"ResearchGate","rows":220929,
  "publishedAt":"2026-09-04T17:27:05+00:00","forSession":"2026-09-04",
- "origin":"s3://x3n7kgbbit/runs/pso_lssvm_v1/latest"}
+ "origin":"s3://crimtr8kbf/results/ResearchGate/runs/pso_lssvm_v1/latest"}
 ```
 
 Compare `forSession` with what the volume holds:
 
 ```bash
-bash -c '. scripts/_common.sh; aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/run_meta.json" -'
+bash -c '. scripts/_common.sh; aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/run_meta.json" -'
 ```
 
 Same `for_session` and matching `rows_total` → **there is nothing to do.**
@@ -94,7 +94,7 @@ same way.)
 
 **"Last published N days ago"** — `publishedAt` is more than five days old. The
 daily run did not go through, or its publish step failed. Look for `[publish]
-FAILED` in the newest `_pod_logs/` entry, fix per the table, then §2.
+FAILED` in the newest `results/ResearchGate/_pod_logs/` entry, fix per the table, then §2.
 
 **"The API did not answer"** — the UI could not reach the API at all.
 

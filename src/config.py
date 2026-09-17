@@ -10,9 +10,30 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The source volume is READ-ONLY, always. It is declared here as a constant so the
-# guard in storage.py has a single authority to compare against.
+# The market-data volume. Its data/ tree is READ-ONLY, always. Pinned here so the
+# guards in storage.py have a single authority to compare against.
 SOURCE_VOLUME_ID = "crimtr8kbf"
+
+# Everything this project writes lives under ONE prefix on the results volume.
+# Since 2026-09-16 that volume IS the market-data volume, so the prefix is the
+# whole write boundary: it must sit under results/ so it can never overlap data/
+# or any other root prefix the acquisition pipeline owns (_pod_logs/, code/, m1/…).
+RESULTS_PREFIX_ROOT = "results/"
+DEFAULT_RESULTS_PREFIX = "results/ResearchGate"
+
+
+def results_prefix(raw: str | None) -> str:
+    """Normalise and validate the write prefix. Raises for anything that is not
+    results/<name>[/...] with clean segments — an empty value is an error, not the
+    default, so a mis-set RESULTS_PREFIX can never widen the boundary."""
+    p = (DEFAULT_RESULTS_PREFIX if raw is None else raw).strip().strip("/")
+    parts = p.split("/")
+    if (not p or len(parts) < 2 or any(s in ("", ".", "..") for s in parts)
+            or not (p + "/").startswith(RESULTS_PREFIX_ROOT)):
+        raise RuntimeError(
+            f"RESULTS_PREFIX must be {RESULTS_PREFIX_ROOT}<name>[/...] with no empty, '.' "
+            f"or '..' segments (got {raw!r}); the volume's data/ tree is read-only")
+    return p
 
 
 @dataclass(frozen=True)
@@ -23,16 +44,16 @@ class Env:
     region: str
     source_volume: str
     results_volume: str
+    results_prefix: str
 
     @staticmethod
     def load() -> "Env":
         src = os.environ.get("SOURCE_VOLUME_ID", SOURCE_VOLUME_ID)
-        dst = os.environ.get("RESULTS_VOLUME_ID", "x3n7kgbbit")
+        dst = os.environ.get("RESULTS_VOLUME_ID", SOURCE_VOLUME_ID)
+        pre = results_prefix(os.environ.get("RESULTS_PREFIX"))
         if src != SOURCE_VOLUME_ID:
             raise RuntimeError(
                 f"SOURCE_VOLUME_ID is pinned to {SOURCE_VOLUME_ID}; got {src!r}")
-        if dst == SOURCE_VOLUME_ID:
-            raise RuntimeError("RESULTS_VOLUME_ID must not be the read-only source volume")
         missing = [k for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
                    if not os.environ.get(k)]
         if missing:
@@ -44,6 +65,7 @@ class Env:
             region=os.environ.get("RUNPOD_S3_REGION", "eu-ro-1"),
             source_volume=src,
             results_volume=dst,
+            results_prefix=pre,
         )
 
 

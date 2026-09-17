@@ -35,21 +35,22 @@ pytest tests/ -q 2>&1 | tail -3
 All tests must pass first. `test_leakage.py` is the one that matters — it proves
 no future information reaches a prediction.
 
-## 2. Clear the results volume
+## 2. Clear the previous results
 
-Only ever `x3n7kgbbit`, and only its `runs/` prefix — `data/` on the same volume
-holds staged ext tickers (see step 3) and must survive the wipe. **The source
-volume (`crimtr8kbf`, pinned in `src/config.py`) is read-only market data and
-must never be written to or deleted from.** Keep a local backup first.
+Only ever `$DST_ROOT` (`s3://crimtr8kbf/results/ResearchGate`), and only its
+`runs/` prefix. **`data/` on the same volume is read-only market data shared
+with the acquisition pipeline and must never be written to or deleted from.**
+`scripts/_common.sh` exposes no root-level write target, so keep every `rm`
+spelled against `$DST_ROOT/...`. Keep a local backup first.
 
 ```bash
 bash -c 'set +e; . scripts/_common.sh; set +e
-mkdir -p results/backup && aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/" results/backup/ --recursive --quiet
-aws s3 rm $S3FLAGS "$DST_BUCKET/runs/" --recursive | tail -2
-aws s3 ls $S3FLAGS "$SRC_BUCKET/data/" | head -2'
+mkdir -p results/backup && aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/" results/backup/ --recursive --quiet
+aws s3 rm $S3FLAGS "$DST_ROOT/runs/" --recursive | tail -2
+aws s3 ls $S3FLAGS "$SRC_BUCKET/data/ohlcv/" | head -2'
 ```
 
-The last line is a deliberate check that the source volume is untouched.
+The last line is a deliberate check that `data/` is untouched.
 
 The deployed dashboard is unaffected by the wipe: it reads MongoDB, which still
 holds the previous run until step 5 publishes the merged rebuild over it. There
@@ -58,7 +59,7 @@ is no gap in what the UI shows.
 ## 2b. Stage/refresh ext tickers
 
 The acquisition pipeline only publishes its own universe to the source volume.
-Tickers outside it are staged on the results volume under identical keys and
+Tickers outside it are staged under `results/ResearchGate/` with identical relative keys and
 read through `LayeredSource`. Refresh them so the replay ends on the same bar
 for every ticker:
 
@@ -111,7 +112,7 @@ KEYF=$(grep "^RUNPOD_API_KEY=" .env | cut -d= -f2-)
 AWSF="--region eu-ro-1 --endpoint-url https://s3api-eu-ro-1.runpod.io"
 prev=""
 while true; do
-  n=$(aws s3 ls $AWSF s3://x3n7kgbbit/runs/pso_lssvm_v1/shards/20/ --recursive 2>/dev/null | grep -c "latest/metrics.json")
+  n=$(aws s3 ls $AWSF s3://crimtr8kbf/results/ResearchGate/runs/pso_lssvm_v1/shards/20/ --recursive 2>/dev/null | grep -c "latest/metrics.json")
   alive=$(curl -sS --max-time 20 https://rest.runpod.io/v1/pods -H "Authorization: Bearer $KEYF" 2>/dev/null | grep -c "researchgate-pso-lssvm")
   line="shards ${n:-0}/20 | pods ${alive:-0}"
   [ "$line" != "$prev" ] && { echo "$line"; prev="$line"; }

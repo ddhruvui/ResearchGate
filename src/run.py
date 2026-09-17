@@ -46,8 +46,8 @@ _SRC: LayeredSource | None = None
 
 
 def dst_read(dst: ResultStore, key: str) -> bytes:
-    """Read our OWN prior output off the results volume (never the source)."""
-    return dst._s3.get_object(Bucket=dst.bucket, Key=key)["Body"].read()
+    """Read our OWN prior output from under the results prefix (never data/)."""
+    return dst.get_bytes(key)
 
 
 def _init_worker():
@@ -225,7 +225,7 @@ def main() -> int:
               flush=True)
 
     print(f"read  volume : {src.bucket}  (READ-ONLY)", flush=True)
-    print(f"write volume : {dst.bucket}", flush=True)
+    print(f"write to     : {dst.url()}", flush=True)
     print(f"tickers={len(tickers)} workers={workers} window={cfg['backtest']['window']}"
           f"/{cfg['backtest']['window_sessions']} kernel={cfg['model']['kernel']}", flush=True)
 
@@ -285,7 +285,7 @@ def main() -> int:
     meta = {
         "run_id": run_id, "stamp": stamp,
         "started_utc": started.isoformat(), "elapsed_sec": round(time.time() - t0, 1),
-        "source_volume": src.bucket, "results_volume": dst.bucket,
+        "source_volume": src.bucket, "results_volume": dst.bucket, "results_prefix": dst.prefix,
         "n_tickers_requested": len(tickers),
         "mode": args.mode,
         "shard": args.shard, "shards": args.shards,
@@ -330,7 +330,7 @@ def main() -> int:
     if not o.get("n"):
         print(f"\nmode={args.mode}: no scored backtest rows (expected for predict mode)",
               flush=True)
-        print(f"results -> s3://{dst.bucket}/{base}/{stamp}/ (and /latest/)", flush=True)
+        print(f"results -> {dst.url(base)}/{stamp}/ (and /latest/)", flush=True)
         return 0
     print("\n" + "=" * 68, flush=True)
     print(f"predictions      : {o['n']:,} over {allpred['ticker'].nunique()} tickers")
@@ -344,7 +344,7 @@ def main() -> int:
             print(f"  {yr}  n={b['n']:7,}  acc={b['direction_accuracy']:.4f}  "
                   f"up-base={b['baseline_always_up']:.4f}  edge={b['edge_vs_always_up']:+.4f}")
     print("=" * 68, flush=True)
-    print(f"results -> s3://{dst.bucket}/{base}/{stamp}/ (and /latest/)", flush=True)
+    print(f"results -> {dst.url(base)}/{stamp}/ (and /latest/)", flush=True)
     return 0
 
 

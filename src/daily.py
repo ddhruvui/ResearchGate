@@ -184,7 +184,7 @@ def main() -> int:
     base = f"{cfg['output']['prefix']}/{run_id}"
 
     def read(key):
-        return dst._s3.get_object(Bucket=dst.bucket, Key=f"{base}/latest/{key}")["Body"].read()
+        return dst.get_bytes(f"{base}/latest/{key}")
 
     # ---- existing state ----
     try:
@@ -242,7 +242,7 @@ def main() -> int:
                 return 0
 
     print(f"read  volume : {src.bucket}  (READ-ONLY)", flush=True)
-    print(f"write volume : {dst.bucket}", flush=True)
+    print(f"write to     : {dst.url()}", flush=True)
     print(f"history      : {len(hist):,} rows, latest {hist['date'].max().date()}", flush=True)
     print(f"to grade     : {len(stored)} stored guesses", flush=True)
     print(f"rss after load: {_rss_mb():.0f} MB", flush=True)

@@ -14,7 +14,7 @@ Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`
 
 Some of the 105 tickers are outside the acquisition pipeline's universe (SPY and
 QQQ at least; `python3 -m src.fetch_ext --dry-run` lists them); their
-bars are staged on the results volume by `src/fetch_ext.py` and do NOT update
+bars are staged under `results/ResearchGate/` by `src/fetch_ext.py` and do NOT update
 nightly on their own. Refresh them first, or their stored predictions never
 grade:
 
@@ -46,7 +46,7 @@ yet — do not launch anything.
 
 ```bash
 bash -c 'set +e; . scripts/_common.sh; set +e
-aws s3 cp $S3FLAGS "$DST_BUCKET/runs/pso_lssvm_v1/latest/next_session.parquet" /tmp/ns.parquet --quiet'
+aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/next_session.parquet" /tmp/ns.parquet --quiet'
 python3 -c "
 import pandas as pd; d=pd.read_parquet('/tmp/ns.parquet')
 print(f'{len(d)} stored guesses, as_of {d[\"as_of\"].astype(str).unique()[0]} -> for {d[\"for_session\"].astype(str).unique()[0]}')"
@@ -95,9 +95,9 @@ export AWS_SECRET_ACCESS_KEY=$(grep "^AWS_SECRET_ACCESS_KEY=" .env | cut -d= -f2
 AWSF="--region eu-ro-1 --endpoint-url https://s3api-eu-ro-1.runpod.io"
 prev=""
 for i in $(seq 1 90); do
-  K=$(aws s3 ls $AWSF s3://x3n7kgbbit/_pod_logs/ 2>/dev/null | grep POD_ID | awk "{print \$4}" | tail -1)
+  K=$(aws s3 ls $AWSF s3://crimtr8kbf/results/ResearchGate/_pod_logs/ 2>/dev/null | grep POD_ID | awk "{print \$4}" | tail -1)
   if [ -n "$K" ]; then
-    aws s3 cp $AWSF "s3://x3n7kgbbit/_pod_logs/$K" /tmp/dr.log --quiet 2>/dev/null
+    aws s3 cp $AWSF "s3://crimtr8kbf/results/ResearchGate/_pod_logs/$K" /tmp/dr.log --quiet 2>/dev/null
     cur=$(grep -E "resources:|to grade|graded |LIVE-only|next guess|run exit|Killed|Traceback|nothing to do|publishing latest|\[publish\]|mongo publish failed|terminated \(204\)" /tmp/dr.log 2>/dev/null)
     if [ "$cur" != "$prev" ]; then
       diff <(printf "%s\n" "$prev") <(printf "%s\n" "$cur") 2>/dev/null | grep "^>" | sed "s/^> //"

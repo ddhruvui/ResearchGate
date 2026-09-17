@@ -1,19 +1,33 @@
 #!/usr/bin/env bash
-# Pod entrypoint. The RESULTS volume (x3n7kgbbit) is mounted at /workspace.
-# The SOURCE volume (8qik4zxpxq) is NOT mounted — it is reached only through the
-# S3 API, read-only, so no filesystem write can ever land on it.
+# Pod entrypoint. The volume crimtr8kbf is mounted at /workspace. Its data/ tree
+# is READ-ONLY market data shared with the acquisition pipeline. This script
+# writes ONLY under /workspace/$RESULTS_PREFIX (results/ResearchGate): its log,
+# the unpacked code bundle, nothing else. The python code writes through
+# src/storage.py::ResultStore, which is confined to the same prefix.
 set +e
 
-LOGDIR=/workspace/_pod_logs
+# Refuse to touch the mount unless the prefix is results/<name>. Failing here
+# writes no log, so launch.sh's startup check kills the pod within minutes.
+case "${RESULTS_PREFIX:-}" in
+  results/?*) ;;
+  *) echo "!! RESULTS_PREFIX must be results/<name> (got '${RESULTS_PREFIX:-}') — refusing to touch /workspace"; sleep 30; exit 1 ;;
+esac
+case "/$RESULTS_PREFIX/" in
+  *"/../"*|*"/./"*|*"//"*) echo "!! RESULTS_PREFIX has a '..', '.' or empty segment — refusing"; sleep 30; exit 1 ;;
+esac
+RP="/workspace/${RESULTS_PREFIX}"
+
+LOGDIR="$RP/_pod_logs"
 mkdir -p "$LOGDIR" 2>/dev/null
 LOG="$LOGDIR/$(date -u +%Y%m%dT%H%M%SZ)-${RUNPOD_POD_ID:-nopod}.log"
 exec > >(tee -a "$LOG") 2>&1
 echo "bootstrap start $(date -u +%FT%TZ) pod=${RUNPOD_POD_ID:-?}"
 python -c 'import sys; print("python", sys.version)'
 
-WORK=/workspace/app
+WORK="$RP/app"
+case "$WORK" in /workspace/results/*/app) ;; *) echo "!! refusing to rm outside results/: $WORK"; exit 1 ;; esac
 rm -rf "$WORK"; mkdir -p "$WORK"
-tar xzf /workspace/code/bundle.tar.gz -C "$WORK" || { echo "!! bundle extract failed"; }
+tar xzf "$RP/code/bundle.tar.gz" -C "$WORK" || { echo "!! bundle extract failed"; }
 cd "$WORK" || exit 1
 ls -la
 

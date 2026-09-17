@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Bundle this project, push it to the RESULTS volume, and run it on a RunPod CPU pod.
+# Bundle this project, push it under results/ResearchGate/ on the volume, and run it on a RunPod CPU pod.
 #
 #   scripts/launch.sh                 # full run (backtest + next-session prediction)
 #   RUN_LIMIT=5 scripts/launch.sh     # smoke test on 5 tickers
 #   DRY_RUN=1 scripts/launch.sh       # show what would happen, touch nothing
 #
-# The pod mounts ONLY x3n7kgbbit. crimtr8kbf is read over S3, read-only.
+# The pod mounts crimtr8kbf at /workspace. Its data/ tree is READ-ONLY market data;
+# the pod writes only under /workspace/$RESULTS_PREFIX (see bootstrap.sh + src/storage.py).
 . "$(dirname "$0")/_common.sh"
 
 IMAGE="${RUNPOD_IMAGE:-python:3.11-slim}"
@@ -26,13 +27,13 @@ tar czf "$BUNDLE" -C "$ROOT" \
 echo "bundle: $(du -h "$BUNDLE" | cut -f1)"
 
 if [ -n "$DRY_RUN" ]; then
-  echo "DRY_RUN: would upload bundle -> $DST_BUCKET/code/bundle.tar.gz"
-  echo "DRY_RUN: would create pod $NAME in $DC mounting $RESULTS_VOLUME_ID at /workspace"
+  echo "DRY_RUN: would upload bundle -> $DST_ROOT/code/bundle.tar.gz"
+  echo "DRY_RUN: would create pod $NAME in $DC mounting $RESULTS_VOLUME_ID at /workspace (writes confined to /workspace/$RESULTS_PREFIX)"
   rm -f "$BUNDLE"; exit 0
 fi
 
-aws s3 cp $S3FLAGS "$BUNDLE" "$DST_BUCKET/code/bundle.tar.gz"
-aws s3 cp $S3FLAGS "$ROOT/scripts/bootstrap.sh" "$DST_BUCKET/code/bootstrap.sh"
+aws s3 cp $S3FLAGS "$BUNDLE" "$DST_ROOT/code/bundle.tar.gz"
+aws s3 cp $S3FLAGS "$ROOT/scripts/bootstrap.sh" "$DST_ROOT/code/bootstrap.sh"
 rm -f "$BUNDLE"
 
 make_payload() {
@@ -48,12 +49,13 @@ PAYLOAD=$(cat <<JSON
   "containerDiskInGb": ${RUNPOD_CONTAINER_DISK_GB:-20},
   "volumeMountPath": "/workspace",
   "dataCenterIds": ["${DC}"],
-  "dockerStartCmd": ["bash", "/workspace/code/bootstrap.sh"],
+  "dockerStartCmd": ["bash", "/workspace/${RESULTS_PREFIX}/code/bootstrap.sh"],
   "env": {
     "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
     "AWS_SECRET_ACCESS_KEY": "${AWS_SECRET_ACCESS_KEY}",
     "SOURCE_VOLUME_ID": "${SOURCE_VOLUME_ID}",
     "RESULTS_VOLUME_ID": "${RESULTS_VOLUME_ID}",
+    "RESULTS_PREFIX": "${RESULTS_PREFIX}",
     "RUNPOD_S3_REGION": "${S3_REGION}",
     "RUNPOD_S3_ENDPOINT": "${S3_ENDPOINT}",
     "RUNPOD_TERMINATE_KEY": "${RUNPOD_API_KEY}",
@@ -117,12 +119,13 @@ launch_gpu() {
   "containerDiskInGb": ${RUNPOD_CONTAINER_DISK_GB:-20},
   "volumeMountPath": "/workspace",
   "dataCenterIds": ["${DC}"],
-  "dockerStartCmd": ["bash", "/workspace/code/bootstrap.sh"],
+  "dockerStartCmd": ["bash", "/workspace/${RESULTS_PREFIX}/code/bootstrap.sh"],
   "env": {
     "AWS_ACCESS_KEY_ID": "${AWS_ACCESS_KEY_ID}",
     "AWS_SECRET_ACCESS_KEY": "${AWS_SECRET_ACCESS_KEY}",
     "SOURCE_VOLUME_ID": "${SOURCE_VOLUME_ID}",
     "RESULTS_VOLUME_ID": "${RESULTS_VOLUME_ID}",
+    "RESULTS_PREFIX": "${RESULTS_PREFIX}",
     "RUNPOD_S3_REGION": "${S3_REGION}",
     "RUNPOD_S3_ENDPOINT": "${S3_ENDPOINT}",
     "RUNPOD_TERMINATE_KEY": "${RUNPOD_API_KEY}",
@@ -171,7 +174,7 @@ for VCPU in $VCPU_LADDER; do
   CODE=$(printf '%s' "$RESP" | tail -n1); BODY=$(printf '%s' "$RESP" | sed '$d')
   if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
     # Parse JSON properly. A greedy sed for "id" grabs the LAST match, which in a
-    # create response is the nested networkVolume id (x3n7kgbbit) — that produced a
+    # create response is the nested networkVolume id — that produced a
     # DELETE against the wrong resource and left the real pod orphaned and billing.
     POD_ID=$(printf '%s' "$BODY" | python3 -c '
 import json, sys
@@ -220,7 +223,7 @@ echo "  launched $NAME -> ${POD_ID}"
 i=0
 while [ $i -lt "${STARTUP_CHECKS:-12}" ]; do
   sleep "${STARTUP_POLL_SEC:-15}"; i=$((i+1))
-  if aws s3 ls $S3FLAGS "$DST_BUCKET/_pod_logs/" 2>/dev/null | grep -q -- "-${POD_ID}.log"; then
+  if aws s3 ls $S3FLAGS "$DST_ROOT/_pod_logs/" 2>/dev/null | grep -q -- "-${POD_ID}.log"; then
     echo "  $NAME confirmed started"; return 0
   fi
 done

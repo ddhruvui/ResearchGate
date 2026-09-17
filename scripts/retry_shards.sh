@@ -17,7 +17,7 @@ for i in $(seq 1 "$TRIES"); do
   # A shard that has already WRITTEN results needs no relaunch. Checking only
   # "is it running" re-spawned finished shards, which recompute identical work
   # and steal capacity from the ones that never placed.
-  done_list=$(aws s3 ls $S3FLAGS "$DST_BUCKET/runs/${RUN_ID:-pso_lssvm_v1}/shards/$(printf '%02d' "$SHARDS")/" \
+  done_list=$(aws s3 ls $S3FLAGS "$DST_ROOT/runs/${RUN_ID:-pso_lssvm_v1}/shards/$(printf '%02d' "$SHARDS")/" \
     --recursive 2>/dev/null | grep "latest/metrics.json" \
     | sed "s|.*/shards/[0-9]*/||;s|/latest.*||" | sed "s/^0*//" | tr "\n" " ")
   for s in $WANT; do

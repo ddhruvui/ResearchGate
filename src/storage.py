@@ -1,15 +1,22 @@
-"""S3 access to the two RunPod network volumes.
+"""S3 access to the RunPod network volume.
 
-HARD RULE: volume 8qik4zxpxq is READ-ONLY. It is enforced three ways —
+HARD RULE: data/ on crimtr8kbf is READ-ONLY. Since 2026-09-16 the same volume
+also carries this project's output, confined to ONE prefix (results/ResearchGate,
+`RESULTS_PREFIX`). The rule is enforced four ways —
 
-  1. `SourceStore` exposes ONLY get/list. It has no put, copy, or delete method,
-     so there is no code path through which this program can write to it.
-  2. `ResultStore.__init__` refuses to construct against the source volume id.
-  3. The pod never MOUNTS the source volume (see scripts/launch.sh: networkVolumeId
-     is the results volume), so no filesystem write can reach it either.
+  1. `SourceStore` / `LayeredSource` expose ONLY get/list. No put, copy or delete
+     method exists, so there is no code path through which a read hits a write.
+  2. `ResultStore` takes keys RELATIVE to the prefix and pins every read and write
+     under results/<name>/ in `_full()`, which rejects absolute keys, '..' and
+     empty segments. It has no delete method, and its raw client is private —
+     tests/test_storage_guard.py greps src/ to prove nothing else touches it.
+  3. `Env.load()` refuses a RESULTS_PREFIX outside results/ and a repointed
+     SOURCE_VOLUME_ID (src/config.py).
+  4. The pod mounts the volume but scripts/bootstrap.sh validates RESULTS_PREFIX
+     before touching /workspace and writes only under /workspace/<RESULTS_PREFIX>.
 
 Anything extra you want alongside the source data — derived columns, caches,
-diagnostics — goes to the results volume.
+diagnostics — goes under the results prefix.
 """
 from __future__ import annotations
 
@@ -20,7 +27,7 @@ from typing import Iterator
 import boto3
 from botocore.config import Config as BotoConfig
 
-from .config import SOURCE_VOLUME_ID, Env
+from .config import RESULTS_PREFIX_ROOT, Env, results_prefix
 
 
 def _client(env: Env):
@@ -77,20 +84,20 @@ class SourceStore:
 
 class LayeredSource:
     """READ-ONLY overlay: a key is served from the source volume first, falling
-    back to the SAME key on the results volume.
+    back to the SAME relative key under the results prefix.
 
-    The acquisition pipeline only publishes its own universe to the source
-    volume, and the source volume is never written from here. Tickers outside
-    that universe are staged by `python -m src.fetch_ext` on the RESULTS volume
-    under identical keys (data/ohlcv/<T>.json, data/splits/<T>.json); this class makes
-    the two buckets read as one dataset. Like SourceStore it exposes no write
-    methods.
+    The acquisition pipeline publishes its own universe under data/. Tickers
+    outside it can be staged by `python -m src.fetch_ext` under the results
+    prefix with identical relative keys (data/ohlcv/<T>.json,
+    data/splits/<T>.json); this class makes the two trees read as one dataset.
+    Like SourceStore it exposes no write methods.
     """
 
     def __init__(self, env: Env):
         self._source = SourceStore(env)
         self._s3 = _client(env)
         self._ext_bucket = env.results_volume
+        self._ext_prefix = results_prefix(env.results_prefix)
 
     @property
     def bucket(self) -> str:
@@ -102,13 +109,14 @@ class LayeredSource:
         except Exception as exc:
             if not _is_absent(exc):
                 raise
-        return self._s3.get_object(Bucket=self._ext_bucket, Key=key)["Body"].read()
+        return self._s3.get_object(Bucket=self._ext_bucket,
+                                   Key=f"{self._ext_prefix}/{key}")["Body"].read()
 
     def get_json(self, key: str):
         return json.loads(self.get_bytes(key))
 
     def try_get_json(self, key: str):
-        """None when the key is absent on BOTH volumes."""
+        """None when the key is absent on BOTH trees."""
         try:
             return self.get_json(key)
         except Exception as exc:
@@ -118,12 +126,15 @@ class LayeredSource:
 
 
 class ResultStore:
-    """Writable view of the results volume. Never the source."""
+    """Read/write view of this project's OWN prefix on the results volume.
+
+    Callers pass keys relative to the prefix (runs/<run_id>/latest/metrics.json,
+    data/ohlcv/<T>.json for staged ext bars); `_full()` pins each one under
+    results/<name>/ and refuses anything that could escape it. No delete method.
+    """
 
     def __init__(self, env: Env):
-        if env.results_volume == SOURCE_VOLUME_ID:
-            raise RuntimeError(
-                f"refusing to write to {SOURCE_VOLUME_ID}: it is the read-only source volume")
+        self._prefix = results_prefix(env.results_prefix)
         self._s3 = _client(env)
         self._bucket = env.results_volume
 
@@ -131,8 +142,53 @@ class ResultStore:
     def bucket(self) -> str:
         return self._bucket
 
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    def url(self, key: str = "") -> str:
+        """s3://<volume>/<prefix>[/<key>] — for log lines and run_meta."""
+        k = key.strip("/")
+        return f"s3://{self._bucket}/{self._prefix}" + (f"/{k}" if k else "")
+
+    def _full(self, key: str) -> str:
+        k = key.strip()
+        parts = k.split("/")
+        if not k or k.startswith("/") or any(s in ("", ".", "..") for s in parts):
+            raise ValueError(
+                f"bad results key {key!r}: must be relative with no empty, '.' or '..' segments")
+        full = f"{self._prefix}/{k}"
+        if not full.startswith(RESULTS_PREFIX_ROOT):        # cannot happen; belt and braces
+            raise ValueError(f"results key escaped the prefix: {full!r}")
+        return full
+
+    # ---- reads (our own prior output only) ----
+    def get_bytes(self, key: str) -> bytes:
+        return self._s3.get_object(Bucket=self._bucket, Key=self._full(key))["Body"].read()
+
+    def get_json(self, key: str):
+        return json.loads(self.get_bytes(key))
+
+    def try_get_bytes(self, key: str) -> bytes | None:
+        try:
+            return self.get_bytes(key)
+        except Exception as exc:
+            if _is_absent(exc):
+                return None
+            raise
+
+    def list_keys(self, prefix: str = "") -> Iterator[str]:
+        """Relative keys under `prefix` (itself relative) — only our own objects."""
+        full = (self._full(prefix) if prefix else self._prefix) + "/"
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=full):
+            for obj in page.get("Contents", []):
+                yield obj["Key"][len(self._prefix) + 1:]
+
+    # ---- writes ----
     def put_bytes(self, key: str, blob: bytes, content_type: str = "application/octet-stream"):
-        self._s3.put_object(Bucket=self._bucket, Key=key, Body=blob, ContentType=content_type)
+        self._s3.put_object(Bucket=self._bucket, Key=self._full(key), Body=blob,
+                            ContentType=content_type)
 
     def put_json(self, key: str, obj) -> None:
         self.put_bytes(key, json.dumps(obj, indent=2, default=str).encode(), "application/json")

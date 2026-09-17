@@ -103,9 +103,9 @@ def load_from_s3(env: Env, base: str):
     dst = ResultStore(env)
 
     def get(key):
-        return dst._s3.get_object(Bucket=dst.bucket, Key=f"{base}/latest/{key}")["Body"].read()
+        return dst.get_bytes(f"{base}/latest/{key}")
 
-    return _read_all(get), f"s3://{dst.bucket}/{base}/latest"
+    return _read_all(get), dst.url(f"{base}/latest")
 
 
 def load_from_dir(d: Path):

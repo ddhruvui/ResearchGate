@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull the latest run off the RESULTS volume into ./results/ and print the summary.
+# Pull the latest run from under results/ResearchGate/ into ./results/ and print the summary.
 #   scripts/results.sh            # latest
 #   scripts/results.sh 20260824T… # a specific stamp
 . "$(dirname "$0")/_common.sh"
@@ -8,8 +8,8 @@ RUN_ID="${RUN_ID:-pso_lssvm_v1}"
 STAMP="${1:-latest}"
 OUT="$ROOT/results/$STAMP"
 mkdir -p "$OUT"
-echo "pulling s3://$RESULTS_VOLUME_ID/runs/$RUN_ID/$STAMP/ -> $OUT"
-aws s3 cp $S3FLAGS "$DST_BUCKET/runs/$RUN_ID/$STAMP/" "$OUT/" --recursive
+echo "pulling $DST_ROOT/runs/$RUN_ID/$STAMP/ -> $OUT"
+aws s3 cp $S3FLAGS "$DST_ROOT/runs/$RUN_ID/$STAMP/" "$OUT/" --recursive
 echo
 [ -f "$OUT/metrics.json" ] && python3 - "$OUT/metrics.json" <<'PY'
 import json, sys

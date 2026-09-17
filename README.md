@@ -20,25 +20,34 @@ instead of a human guessing them.
 
 ## Volumes — the read-only rule
 
-| Volume | Role | Access |
-|---|---|---|
-| `8qik4zxpxq` | market data (EOD bars, splits, calendar) | **READ-ONLY** |
-| `x3n7kgbbit` | all results, logs, code bundle | read/write |
+| Volume | Prefix | Role | Access |
+|---|---|---|---|
+| `crimtr8kbf` | `data/` | market data (EOD bars, splits, calendar), published by the acquisition pipeline | **READ-ONLY** |
+| `crimtr8kbf` | `results/ResearchGate/` | all results, pod logs, code bundle (`RESULTS_PREFIX`) | read/write |
 
-`8qik4zxpxq` is never written to. Enforced three independent ways:
+Since 2026-09-16 there is one volume. `data/` — and every other root prefix the
+acquisition pipeline owns — is never written to. Enforced four independent ways:
 
-1. **`SourceStore` has no write methods.** No put, copy or delete exists on the
-   class, so there is no code path to a write. `tests/test_storage_guard.py`
-   asserts this by introspection.
-2. **`ResultStore.__init__` refuses** to construct against the source volume id,
-   and `Env.load()` refuses if `RESULTS_VOLUME_ID` equals it or if
-   `SOURCE_VOLUME_ID` is repointed away from `8qik4zxpxq`.
-3. **The pod never mounts it.** `scripts/launch.sh` sets `networkVolumeId` to the
-   *results* volume, so `/workspace` is `x3n7kgbbit`. The source is reached only
-   through S3 `GetObject`/`ListObjects` — no filesystem path exists to it.
+1. **`SourceStore` / `LayeredSource` have no write methods.** No put, copy or
+   delete exists on either class, so there is no code path from a read to a
+   write. `tests/test_storage_guard.py` asserts this by introspection.
+2. **`ResultStore` is confined to `RESULTS_PREFIX`.** Every key a caller passes
+   is relative and is pinned under `results/<name>/` by `_full()`, which rejects
+   absolute keys, `..` and empty segments. It has no delete method, and its raw
+   S3 client is private — the tests grep `src/` to prove nothing else touches
+   it. `Env.load()` refuses a `RESULTS_PREFIX` outside `results/` and a
+   repointed `SOURCE_VOLUME_ID`.
+3. **The pod writes only under `/workspace/results/ResearchGate/`.**
+   `scripts/bootstrap.sh` validates `RESULTS_PREFIX` before touching the mount
+   and keeps its log and the unpacked bundle under that path; the python code
+   goes through `ResultStore`.
+4. **The shell helpers have no root-level write target.** `scripts/_common.sh`
+   exposes `SRC_BUCKET` (the read-only root, `ls`/`cp` from only) and
+   `DST_ROOT` (`s3://crimtr8kbf/results/ResearchGate`); every `aws s3 rm` in
+   the skills is spelled against `$DST_ROOT/...`.
 
 Anything extra you want alongside the source data — derived columns, caches,
-diagnostics — is written to `x3n7kgbbit`.
+diagnostics — is written under `results/ResearchGate/`.
 
 ---
 
@@ -290,6 +299,6 @@ src/run.py               entrypoint
 src/daily.py             grade -> learn -> guess, the everyday path
 src/strategy.py          the $10k-per-stock stop-loss paper trade (reads only)
 src/publish_mongo.py     latest/ -> MongoDB Atlas, for the deployed dashboard
-scripts/launch.sh        bundle -> results volume -> CPU pod -> self-terminate
+scripts/launch.sh        bundle -> results/ResearchGate/code -> CPU pod -> self-terminate
 tests/                   leakage proof, model sanity, storage guards
 ```

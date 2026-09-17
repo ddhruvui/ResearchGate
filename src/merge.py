@@ -40,21 +40,19 @@ def main() -> int:
     for k in range(args.shards):
         pre = f"{base}/shards/{args.shards:02d}/{k:02d}/latest"
         try:
-            blob = dst._s3.get_object(Bucket=dst.bucket,
-                                      Key=f"{pre}/predictions.parquet")["Body"].read()
+            blob = dst.get_bytes(f"{pre}/predictions.parquet")
             frames.append(pd.read_parquet(io.BytesIO(blob)))
         except Exception as exc:
             missing.append((k, str(exc)[:80]))
             continue
         for name, sink in (("next_session.parquet", lives),):
             try:
-                b = dst._s3.get_object(Bucket=dst.bucket, Key=f"{pre}/{name}")["Body"].read()
+                b = dst.get_bytes(f"{pre}/{name}")
                 sink.append(pd.read_parquet(io.BytesIO(b)))
             except Exception:
                 pass
         try:
-            b = dst._s3.get_object(Bucket=dst.bucket,
-                                   Key=f"{pre}/ticker_info.json")["Body"].read()
+            b = dst.get_bytes(f"{pre}/ticker_info.json")
             infos.extend(json.loads(b))
         except Exception:
             pass
@@ -90,7 +88,7 @@ def main() -> int:
     dst.put_json(f"{out}/ticker_info.json", infos)
     if lives:
         dst.put_dataframe(f"{out}/next_session.parquet", pd.concat(lives, ignore_index=True))
-    print(f"written to s3://{dst.bucket}/{out}/"
+    print(f"written to {dst.url(out)}/"
           + ("   [PARTIAL]" if missing else ""))
 
     # A rebuild changes every row, so the deployed dashboard's copy is replaced

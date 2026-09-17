@@ -4,7 +4,7 @@ The acquisition pipeline (DataAcquistion) publishes data/ohlcv/<T>.json and
 data/splits/<T>.json for its own universe to the read-only source volume.
 Tickers in tickers.json that it does not cover (and have no data.source_keys
 override pointing at another key on the source volume) are fetched here straight from
-EODHD and staged on the RESULTS volume under the same keys, where LayeredSource
+EODHD and staged under the results prefix with the same relative keys, where LayeredSource
 picks them up. The source volume is never touched.
 
 Idempotent: a re-run refetches the full history and overwrites the staged file,
@@ -81,7 +81,7 @@ def main() -> int:
     have |= set(cfg["data"].get("source_keys") or {})   # filed elsewhere on the source volume
     ext = [t for t in want if t not in have]
     print(f"universe {len(want)} | on source volume {len(want) - len(ext)} | "
-          f"to stage on {dst.bucket}: {len(ext)}", flush=True)
+          f"to stage under {dst.url()}: {len(ext)}", flush=True)
     if not ext:
         return 0
     if args.dry_run:
@@ -112,7 +112,7 @@ def main() -> int:
     if failed:
         print(f"\n{len(failed)} ticker(s) failed: {' '.join(failed)}", file=sys.stderr)
         return 1
-    print(f"\nstaged {len(ext)} tickers under s3://{dst.bucket}/{prefix}/", flush=True)
+    print(f"\nstaged {len(ext)} tickers under {dst.url(prefix)}/", flush=True)
     return 0
 
 
