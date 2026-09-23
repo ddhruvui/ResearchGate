@@ -1,5 +1,12 @@
 # Daily use
 
+```bash
+RUN_MODE=daily SHARDS=1 WATCHDOG_SEC=3600 bash scripts/launch.sh
+```
+
+Pods can't delete themselves. When the run finishes, delete the pod on RunPod or it keeps billing.
+`/daily-run` runs this command and deletes the pod for you.
+
 ## Every day
 
 After the new day's data is published, type:
