@@ -144,7 +144,9 @@ def run_ticker(ticker: str, bars: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame
     info = {"ticker": ticker, "n_predictions": len(out), "C": C, "gamma": gamma,
             "kernel": cfg["model"]["kernel"], "retune": cadence,
             "n_tunings": len(tunings), "tunings": tunings,
-            "pso_tuned_at": tunings[0]["date"] if tunings else None,
+            # LAST tuning, not the first: the daily compares this against the
+            # current quarter, so handing it the 2021 date would re-tune every run.
+            "pso_tuned_at": tunings[-1]["date"] if tunings else None,
             "first_date": str(out["date"].min()) if len(out) else None,
             "last_date": str(out["date"].max()) if len(out) else None}
     return out, info

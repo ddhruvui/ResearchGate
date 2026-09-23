@@ -83,6 +83,37 @@ def _quarter(d: pd.Timestamp) -> tuple[int, int]:
     return (d.year, (d.month - 1) // 3)
 
 
+def stamped_at(dials: dict | None) -> str | None:
+    """When the stored dials were last PSO-tuned, whichever name carries it.
+
+    The backtest stamps `pso_tuned_at` (walkforward.py); a daily rewrites
+    ticker_info.json with its own `tuned_at`. Reading only one of the two names
+    yielded None for every ticker, which made `needs_retune` fall through and
+    PSO never re-tune again after a rebuild.
+    """
+    d = dials or {}
+    return d.get("tuned_at") or d.get("pso_tuned_at")
+
+
+def needs_retune(dials: dict | None, cadence: str, when: pd.Timestamp) -> bool:
+    """Whether PSO should re-tune this ticker for the session at `when`."""
+    d = dials or {}
+    if d.get("C") is None or d.get("gamma") is None:
+        return True
+    if cadence not in ("annual", "quarterly"):
+        return False
+    tuned_at = stamped_at(d)
+    if not tuned_at:
+        # No stamp at all: the provenance is lost, so we cannot tell which quarter
+        # these dials came from. Re-tune once and stamp it rather than carry
+        # unknown-age dials forward for ever.
+        return True
+    last = pd.Timestamp(tuned_at)
+    if cadence == "annual":
+        return when.year != last.year
+    return _quarter(when) != _quarter(last)
+
+
 def _one(ticker: str, cfg: dict, stored: dict | None, graded_dates: set, dials: dict | None):
     """Grade + learn + guess for one ticker. Returns (graded_row, live_row, info)."""
     try:
@@ -132,14 +163,10 @@ def _one(ticker: str, cfg: dict, stored: dict | None, graded_dates: set, dials: 
 
         C = (dials or {}).get("C")
         gamma = (dials or {}).get("gamma")
-        tuned_at = (dials or {}).get("tuned_at")
+        tuned_at = stamped_at(dials)
         retuned = False
         cadence = cfg["pso"].get("retune", "once") if cfg["pso"]["enabled"] else "once"
-        need = C is None or gamma is None
-        if not need and cadence in ("annual", "quarterly") and tuned_at:
-            last = pd.Timestamp(tuned_at)
-            need = (dates[j].year != last.year) if cadence == "annual" \
-                else (_quarter(dates[j]) != _quarter(last))
+        need = needs_retune(dials, cadence, dates[j])
         if need and cfg["pso"]["enabled"]:
             # Tuned on the SAME trailing slice the model trains on — data prior only.
             C, gamma, _ = optimise(Xt, yt, cfg)
