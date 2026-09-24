@@ -67,8 +67,13 @@ curl -sS --max-time 25 https://rest.runpod.io/v1/pods -H "Authorization: Bearer 
  | python3 -c "import json,sys; print([x[\"name\"] for x in json.load(sys.stdin) if \"researchgate\" in (x.get(\"name\") or \"\")] or \"none\")"'
 ```
 
-A pod already running will do the work; launching a second is wasteful (the
-idempotency guard makes it harmless, but it still costs a placement).
+A pod already running will do the work. Since 2026-09-22 `launch.sh` also checks
+this itself for the single-pod path and prints `already running — skipping`, so a
+second `/daily-run` no longer places a duplicate pod — but check anyway, so you
+watch the log of the pod that is actually doing the work.
+
+`RUN_MODE` is mandatory: a bare `bash scripts/launch.sh` now exits 2 instead of
+silently starting the full walk-forward rebuild.
 
 ## 4. Launch
 

@@ -188,15 +188,15 @@ cp .env.example .env          # fill in RunPod S3 + account keys
 pip install -r requirements.txt
 pytest tests/ -q              # 15 tests, including the leakage proof
 
-RUN_LIMIT=3 scripts/launch.sh # smoke test on a pod
-scripts/launch.sh             # full run: backtest + next-session prediction
+RUN_MODE=both RUN_LIMIT=3 scripts/launch.sh   # smoke test on a pod
+RUN_MODE=both SHARDS=20 scripts/launch.sh     # full run: backtest + next-session prediction
 scripts/results.sh            # pull the latest results and print the summary
 ```
 
 Daily operation after the first full backtest:
 
 ```sh
-RUN_MODE=predict scripts/launch.sh
+RUN_MODE=daily SHARDS=1 WATCHDOG_SEC=3600 bash scripts/launch.sh
 ```
 
 `predict` mode skips the 1,415-step replay and reuses the hyper-parameters PSO

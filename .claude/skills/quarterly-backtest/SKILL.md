@@ -83,7 +83,7 @@ outstanding.
 
 ```bash
 cd /Users/dhruvdesai/Development/ResearchGate
-SHARDS=20 WATCHDOG_SEC=43200 bash scripts/launch.sh 2>&1 | grep -E "launched|placed at|no capacity at 2|all pods|some pods" | tail -25
+RUN_MODE=both SHARDS=20 WATCHDOG_SEC=43200 bash scripts/launch.sh 2>&1 | grep -E "launched|placed at|no capacity at 2|all pods|some pods" | tail -25
 ```
 
 20 shards × 5–6 tickers (quarterly re-tuning is ~8× the cost of tuning once:

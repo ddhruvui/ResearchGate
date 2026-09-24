@@ -26,7 +26,9 @@ for i in $(seq 1 "$TRIES"); do
   done
   if [ -z "$still" ]; then echo "all requested shards are running"; exit 0; fi
   echo "attempt $i: still need shards$still"
+  # launch.sh no longer defaults RUN_MODE; a shard retry is always the full replay.
   SHARDS="$SHARDS" SHARD_LIST="$still" WATCHDOG_SEC="${WATCHDOG_SEC:-43200}" \
+    RUN_MODE="${RUN_MODE:-both}" \
     bash "$ROOT/scripts/launch.sh" 2>&1 | grep -E "launched|already running|no capacity at 2" | tail -6
   sleep "$INTERVAL"
 done
