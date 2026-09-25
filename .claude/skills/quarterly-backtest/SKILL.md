@@ -108,17 +108,27 @@ SHARDS=20 SHARD_LIST="4 5 6 7" TRIES=80 INTERVAL=180 WATCHDOG_SEC=43200 \
 It skips shards that are already running **or already finished**, so it is safe
 to leave going.
 
-## 4. Monitor — and delete each pod as its shard lands
+## 4. Monitor — the reaper deletes each pod as its shard lands
 
-**Pods do not go away on their own.** Their self-terminate DELETE gets HTTP 403
-(every run since 2026-09-09), so a finished pod stays up and bills. `bootstrap.sh`
-then deliberately idles (`sleep infinity`) instead of exiting: an exited container
-is restarted by RunPod and **re-runs the whole shard**, rewriting `latest/` each
-pass (2026-09-17: 18 pods re-ran 2–4 times before being deleted). So the monitor
-deletes each pod from the laptop once its shard's `latest/metrics.json` exists and
-its log shows `run exit=0`, and flags failure signatures in every live pod's log.
+**Start the reaper with the run.** Pods self-terminate again (the HTTP 403 every
+pod hit from 2026-09-09 on was Cloudflare's 1010 block on the default
+`Python-urllib/*` User-Agent; `bootstrap.sh` now sends its own UA, with GraphQL
+`podTerminate` and `runpodctl` behind it). But 20 idle pods is real money, so
+nothing here depends on that: the host-side reaper reads each pod's own log off
+the volume and deletes it once the `work=` line is there — after the run, the
+strategy pass and the publish, never mid-publish.
 
-Wrap in `bash -c` — zsh will not word-split `$S3FLAGS` and every aws call fails
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate && nohup scripts/reap_pods.sh --watch --until-empty > /tmp/reap.log 2>&1 &
+```
+
+It also covers the restart loop that used to cost whole rebuilds: a pod that
+cannot delete itself is relaunched by RunPod and **re-ran its whole shard**,
+rewriting `latest/` each pass (2026-09-17: 18 pods re-ran 2–4 times). `bootstrap.sh`
+now idles rather than exits *and* keeps a marker so a restarted container reports
+the original run instead of replaying it.
+
+The monitor below then only watches progress and flags failures. Wrap in `bash -c` — zsh will not word-split `$S3FLAGS` and every aws call fails
 silently, reporting 0 shards done while results sit on the volume. Keep the aws
 timeouts: without them one hung call froze a monitor for 30 minutes while
 finished pods billed.
@@ -145,8 +155,7 @@ except Exception: print(\"ERR\")")
     bad=$(grep -m1 -E "Traceback|No module|Killed|MemoryError|run exit=[1-9]|WATCHDOG TIMEOUT|!! bundle|!! pip" /tmp/qb_s$s.log)
     [ -n "$bad" ] && case "$seen" in *" F$s "*) ;; *) echo "FAIL s$s ($id): $bad"; seen="$seen F$s ";; esac
     case "$done_list" in *" $s "*) grep -q "run exit=0" /tmp/qb_s$s.log && {
-      code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 -X DELETE https://rest.runpod.io/v1/pods/$id -H "Authorization: Bearer $RUNPOD_API_KEY")
-      case "$seen" in *" D$s "*) ;; *) echo "s$s done -> deleted pod $id (HTTP $code)"; seen="$seen D$s ";; esac; } ;; esac
+      case "$seen" in *" D$s "*) ;; *) echo "s$s done (pod $id — the reaper takes it from here)"; seen="$seen D$s ";; esac; } ;; esac
   done <<< "$pods"
   n=$(printf "%s" "$done_list" | wc -w | tr -d " "); alive=$(printf "%s" "$pods" | grep -c .)
   line="shards $n/20 | pods $alive"; [ "$line" != "$prev" ] && { echo "$line"; prev="$line"; }
@@ -159,9 +168,12 @@ done'
 The Monitor tool caps a watch at 30 minutes; a healthy run fits, otherwise re-arm
 it (the loop is stateless apart from not repeating its own lines).
 
-On a `FAIL` line, the failed pod is also idling and billing: delete it
-(`DELETE https://rest.runpod.io/v1/pods/<id>`), fix the cause, and relaunch just
-that shard with `retry_shards.sh` (`SHARD_LIST="<k>"`).
+On a `FAIL` line the reaper deletes that pod too — a failed run is still a
+finished one, its log is already on the volume, and a pod left up **blocks the
+relaunch** of its own shard (`launch.sh` skips a name that is already running).
+Read `/tmp/qb_s<k>.log`, fix the cause, and relaunch just that shard with
+`retry_shards.sh` (`SHARD_LIST="<k>"`). To keep a failed pod alive to look at,
+run the reaper with `--keep-failed`, or launch that shard with `KEEP_POD=1`.
 
 Shard pace varies with how many quarters its tickers span and with the vCPU the
 pod placed at. One straggler holding up the end is normal.
@@ -241,7 +253,7 @@ correlation 0.003 (Spearman 0.007), negative in every year except 2022
 | Pod id equals the volume id | greedy `sed` for `"id"`; parse JSON properly |
 | Finished shards relaunching | retry loop checking "running" instead of "completed" |
 | `No module named 'src'` on several shards within minutes of launch | code unpacked to one shared `app/` on the volume; each pod's `rm -rf` wiped the others' — unpack to container disk (fixed in `bootstrap.sh` 2026-09-17) |
-| Several `_pod_logs/` files per pod id, extra timestamped run dirs per shard | container exited after the 403 terminate loop and RunPod restarted it, re-running the shard — `bootstrap.sh` now idles instead; delete pods from the laptop (step 4) |
+| Several `_pod_logs/` files per pod id, extra timestamped run dirs per shard | container exited after a failed terminate and RunPod restarted it, re-running the shard. `bootstrap.sh` now idles instead, and its restart guard stops a restarted container replaying the shard; the reaper (step 4) clears the pod |
 | Monitor silent for 30 min while pods finished | an aws call hung with no read timeout — keep `--cli-read-timeout` / `--cli-connect-timeout` |
 | `[publish] FAILED: ServerSelectionTimeoutError` after the merge | Atlas unreachable or wrong `DB_PASSWORD` in `.env`; results are on the volume, republish per 5b |
 | Dashboard shows the rebuild's metrics but the daily live log is gone | expected — the wipe discards the accumulated live rows and the rebuild replaces the run; the pre-wipe copy is in `results/backup/` |

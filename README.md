@@ -300,5 +300,6 @@ src/daily.py             grade -> learn -> guess, the everyday path
 src/strategy.py          the $10k-per-stock stop-loss paper trade (reads only)
 src/publish_mongo.py     latest/ -> MongoDB Atlas, for the deployed dashboard
 scripts/launch.sh        bundle -> results/ResearchGate/code -> CPU pod -> self-terminate
+scripts/reap_pods.sh     host-side reaper: deletes pods whose run has finished
 tests/                   leakage proof, model sanity, storage guards
 ```

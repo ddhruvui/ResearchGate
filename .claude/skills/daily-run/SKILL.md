@@ -107,12 +107,12 @@ for i in $(seq 1 90); do
   K=$(aws s3 ls $AWSF s3://crimtr8kbf/results/ResearchGate/_pod_logs/ 2>/dev/null | grep POD_ID | awk "{print \$4}" | tail -1)
   if [ -n "$K" ]; then
     aws s3 cp $AWSF "s3://crimtr8kbf/results/ResearchGate/_pod_logs/$K" /tmp/dr.log --quiet 2>/dev/null
-    cur=$(grep -E "resources:|to grade|graded |LIVE-only|next guess|run exit|Killed|Traceback|nothing to do|publishing latest|\[publish\]|mongo publish failed|terminated \(204\)" /tmp/dr.log 2>/dev/null)
+    cur=$(grep -E "resources:|to grade|graded |LIVE-only|next guess|run exit|Killed|Traceback|nothing to do|publishing latest|\[publish\]|mongo publish failed|work=|TERMINATED via" /tmp/dr.log 2>/dev/null)
     if [ "$cur" != "$prev" ]; then
       diff <(printf "%s\n" "$prev") <(printf "%s\n" "$cur") 2>/dev/null | grep "^>" | sed "s/^> //"
       prev="$cur"
     fi
-    grep -q -E "terminated \(204\)|already gone \(404\)|TERMINATION NOT CONFIRMED" /tmp/dr.log 2>/dev/null && { echo "RUN FINISHED"; exit 0; }
+    grep -q -E "TERMINATED via|TERMINATION NOT CONFIRMED" /tmp/dr.log 2>/dev/null && { echo "RUN FINISHED"; exit 0; }
   fi
   sleep 20
 done'
@@ -125,20 +125,36 @@ identical to a crash. `run exit=0` is not the end: the pod then publishes
 `[publish] ResearchGate: predictions appended +105 …`) and only then
 tries to self-terminate, which is what the loop waits for.
 
-**Then delete the pod from the laptop.** Since 2026-09-09 the pod's own DELETE
-gets HTTP 403 every time, so the log ends in `!! TERMINATION NOT CONFIRMED` and the
-pod stays up, idling and billing (`bootstrap.sh` deliberately sleeps rather than
-exits there — an exited container is restarted by RunPod and re-runs the whole
-job). Once the publish line is in the log you do not need to wait out the retries:
+**Confirm the pod is gone.** The log ends in `TERMINATED via rest: HTTP 204` and
+the pod deletes itself. The 403s that made every run since 2026-09-09 need a
+manual delete were Cloudflare's 1010 block on the default `Python-urllib/*`
+User-Agent; `bootstrap.sh` now sends its own UA and falls back to GraphQL
+`podTerminate` and `runpodctl`, naming whichever rung worked.
+
+If the log ends in `!! TERMINATION NOT CONFIRMED` instead, the pod is idling and
+billing, and the reaper clears it — one pass is enough once `work=` is in the log:
+
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate && scripts/reap_pods.sh
+```
+
+It reads each pod's own log off the volume and deletes only pods whose `work=`
+line is there, so it is safe to run at any time, including mid-run. To not have
+to think about it at all, start it in the background right after the launch:
+
+```bash
+cd /Users/dhruvdesai/Development/ResearchGate && nohup scripts/reap_pods.sh --watch --until-empty > /tmp/reap.log 2>&1 &
+```
+
+Either way, end with no pods left:
 
 ```bash
 cd /Users/dhruvdesai/Development/ResearchGate && bash -c 'set +e; . scripts/_common.sh; set +e
-curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE https://rest.runpod.io/v1/pods/POD_ID -H "Authorization: Bearer $RUNPOD_API_KEY"
 curl -sS --max-time 25 https://rest.runpod.io/v1/pods -H "Authorization: Bearer $RUNPOD_API_KEY" \
  | python3 -c "import json,sys; print([x[\"name\"] for x in json.load(sys.stdin)] or \"none\")"'
 ```
 
-Expect `204` and `none`.
+Expect `none`.
 
 ## 6. Verify on the dashboard and report
 
@@ -208,4 +224,6 @@ nothing yet.
 | no `publishing latest/` line after `run exit=0` | `MONGO_URI` was empty in `.env` at launch — republish from the laptop |
 | `to grade : <105` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like, if any are ever staged again (step 0) |
 | `no prior predictions.parquet … run a full backtest first` | no rebuild has merged — step 2 should have caught it; run `/quarterly-backtest` |
-| `!! TERMINATION NOT CONFIRMED` | pod could not delete itself (403) and is still billing — delete it from the laptop (step 5) |
+| `TERMINATED via rest: HTTP 204` | the pod deleted itself and is gone — nothing to clean up |
+| `!! TERMINATION NOT CONFIRMED` | every rung of the terminate ladder refused; the pod is idling and billing — `scripts/reap_pods.sh` (step 5). A 403 here means the Cloudflare UA block is back, so check the User-Agent in `bootstrap.sh` |
+| `RESTART DETECTED — this pod already ran …` | RunPod relaunched a container that could not delete itself; the restart guard stopped the job re-running. Reap the pod |

@@ -25,9 +25,12 @@ downloaded to this machine.
 often out of CPU, and it retries before falling back to a GPU.
 
 **Cost:** ~$0.01 on CPU, ~$0.02 if it falls back to GPU — *provided the pod is
-deleted once it publishes*. Pods cannot delete themselves (RunPod answers their
-DELETE with 403), so a finished pod idles and bills until the laptop deletes it;
-the skill does that as its last step.
+deleted once it publishes*. The pod deletes itself at the end of the run; every
+pod from 2026-09-09 on could not, because Cloudflare 1010-blocks the default
+`Python-urllib/*` User-Agent that `bootstrap.sh` was sending (fixed — it now sends
+its own UA, then tries GraphQL `podTerminate` and `runpodctl`). Nothing relies on
+that: `scripts/reap_pods.sh` deletes finished pods from the laptop, and the skill
+runs it.
 
 **Needs a merged rebuild.** The daily grades the forecast the last run stored. If
 `results/ResearchGate/runs/` is empty (e.g. after a results wipe) there is nothing
@@ -187,9 +190,9 @@ FAILED`, then run the daily or republish by hand.
 | `nothing to do` | already processed, or vendor hasn't published | Not a failure. Check the source's newest bar |
 | `to grade : <105` | stored forecast file was clobbered (or, if any ext tickers are ever staged again, they went stale) | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh staged names |
 | `no prior predictions.parquet … run a full backtest first` | no rebuild has merged since results were cleared | Run the full rebuild |
-| `!! TERMINATION NOT CONFIRMED`, pod still listed after the run | pod's self-delete got 403; it is idling and billing | Delete it from the laptop: `DELETE https://rest.runpod.io/v1/pods/<id>` with `RUNPOD_API_KEY` |
+| `!! TERMINATION NOT CONFIRMED`, pod still listed after the run | every rung of the terminate ladder refused; the pod is idling and billing | `scripts/reap_pods.sh` (or `--watch --until-empty` alongside a run). A 403 here means the Cloudflare UA block is back — check the User-Agent in `bootstrap.sh` |
 | `No module named 'src'` on several shards right after launch | pods shared one unpack dir on the volume and wiped each other's code | Fixed in `scripts/bootstrap.sh` (unpacks to container disk); if it recurs, check nothing unpacks under `/workspace` |
-| Several `_pod_logs/` files for one pod id; extra run dirs per shard | a pod exited after the 403 and RunPod restarted it, re-running the job | Fixed (`bootstrap.sh` idles instead of exiting); delete the pod |
+| Several `_pod_logs/` files for one pod id; extra run dirs per shard | a pod exited after a failed terminate and RunPod restarted it, re-running the job | Fixed twice over: `bootstrap.sh` idles instead of exiting, and its `.ran-<pod>` marker stops a restarted container replaying the job. Reap the pod |
 | `run exit=137` | out of memory | Should not recur; report it if it does |
 | `no CPU or GPU capacity` | EU-RO-1 full | Retry in a few minutes; volumes are pinned to that datacenter |
 | Monitor says 0 done but results exist | zsh word-splitting bug | Monitor commands must be wrapped in `bash -c` |

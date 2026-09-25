@@ -4,8 +4,14 @@
 RUN_MODE=daily SHARDS=1 WATCHDOG_SEC=3600 bash scripts/launch.sh
 ```
 
-Pods can't delete themselves. When the run finishes, delete the pod on RunPod or it keeps billing.
-`/daily-run` runs this command and deletes the pod for you.
+The pod deletes itself when the run finishes. If it can't, this clears it (safe to run any time —
+it only deletes pods whose run is over):
+
+```bash
+scripts/reap_pods.sh
+```
+
+`/daily-run` does both for you.
 
 ## Every day
 
