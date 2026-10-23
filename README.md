@@ -9,7 +9,7 @@
 Implementation of **"A Machine Learning Model for Stock Market Prediction"** —
 Hegazy, Soliman & Abdul Salam, *IJCST* 4(12), Dec 2013
 ([MachineLearningModel.pdf](MachineLearningModel.pdf)) — applied to a hand-picked
-universe of 105 US large caps and ETFs (`tickers.json`), with a walk-forward
+universe of 151 US large caps and ETFs (`tickers.json`), with a walk-forward
 backtest and a daily live prediction.
 
 The paper's idea: an LS-SVM predicts the next price from five technical
@@ -166,18 +166,18 @@ would then be running a system your evidence never tested.
 
 ### Known biases, stated plainly
 
-* **Universe selection.** `tickers.json` is a hand-picked list of 105 names
-  chosen in September 2026 (large-cap tech-heavy, plus SPY and QQQ), so a
+* **Universe selection.** `tickers.json` is a hand-picked list of 151 names
+  chosen in October 2026 (large caps across sectors, plus SPY and QQQ), so a
   backtest starting 2021 partly picks names for how they performed over the test
   window. `HistoricalTickerComponents` in the source volume's
   `data/universe/GSPC.INDX.json` supports a point-in-time rebuild if this matters.
 * **Adjusted prices are restated.** `adjusted_close` for 2021 reflects every
   split and dividend since. Splits rescale the series uniformly and are harmless
   to returns; dividend adjustment is a small genuine lookahead.
-* **Late listings.** APP, ASTS, COIN, HOOD, RKLB, SOFI (2021 listings) and ARM
-  (2023) have little or no pre-2021 history and PLTR has 65 rows;
-  `min_train_rows` staggers them in when they qualify, so the universe grows
-  from roughly 97 to 105 over the run.
+* **Late listings.** ABNB, DASH, SNOW (late-2020 listings), HOOD (2021), CEG
+  (2022), ARM (2023) and GEV (2024) have little or no pre-2021 history and PLTR
+  has 65 rows; `min_train_rows` staggers them in when they qualify, so the
+  universe grows over the run to 151.
 
 ---
 

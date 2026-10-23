@@ -5,7 +5,7 @@
 run_id: pso_lssvm_v1
 
 data:
-  tickers_file: tickers.json      # 105 names (hand-picked 2026-09-16), this repo
+  tickers_file: tickers.json      # 151 names (hand-picked 2026-10-23), this repo
   source_prefix: data/ohlcv       # <SOURCE_VOLUME>/data/ohlcv/<TICKER>.json (moved from
   splits_prefix: data/splits      #   data/<TICKER>.json on 2026-09-16, DataAcquistion 8a84a38);
                                   #   tickers the acquisition doesn't cover are staged under

@@ -6,16 +6,17 @@ description: Run and monitor the everyday PSO+LS-SVM pipeline — grade yesterda
 # Daily run
 
 One pass: **grade → learn → guess**. Never replays history. ~1 min of compute for
-105 tickers; the slow part is placing a pod.
+151 tickers; the slow part is placing a pod.
 
 Working directory is the repo root (`/Users/dhruvdesai/Development/ResearchGate`).
 
-## 0. Ext tickers — nothing to stage for the current universe
+## 0. Ext tickers — check staging for the current universe
 
-All 105 tickers are on the source volume: 103 under `data/ohlcv/`, SPY and QQQ
-through the `data.source_keys` override in `config/experiment.yaml`
-(`python3 -m src.fetch_ext` reported `to stage: 0` on 2026-09-16). Skip this
-step. Only if `tickers.json` gains a name the acquisition pipeline does not
+The universe changed to 151 names on 2026-10-23 (70 added); source-volume
+coverage for the new names has not been checked yet. SPY and QQQ come
+through the `data.source_keys` override in `config/experiment.yaml`. Run
+`python3 -m src.fetch_ext` (see quarterly-backtest step 2) and stage anything
+it reports before relying on this step being a no-op. Only if `tickers.json` gains a name the acquisition pipeline does not
 publish, stage it first with
 `bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'` — staged bars do
 not refresh on their own, so from then on this step runs before every daily.
@@ -51,7 +52,7 @@ import pandas as pd; d=pd.read_parquet('/tmp/ns.parquet')
 print(f'{len(d)} stored guesses, as_of {d[\"as_of\"].astype(str).unique()[0]} -> for {d[\"for_session\"].astype(str).unique()[0]}')"
 ```
 
-**If this shows fewer than 105 rows, stop.** A partial file means a limited run
+**If this shows fewer than 151 rows, stop.** A partial file means a limited run
 overwrote it. Restore with `python3 -m src.merge --shards 20` before continuing.
 
 **If the file does not exist at all, stop.** No rebuild has merged (e.g. after a
@@ -122,7 +123,7 @@ Substitute the real pod id for `POD_ID`. The grep must cover failure signatures
 (`Killed`, `Traceback`), not just the happy path — silence otherwise looks
 identical to a crash. `run exit=0` is not the end: the pod then publishes
 `latest/` to MongoDB for the dashboard (`publishing latest/ to MongoDB` …
-`[publish] ResearchGate: predictions appended +105 …`) and only then
+`[publish] ResearchGate: predictions appended +151 …`) and only then
 tries to self-terminate, which is what the loop waits for.
 
 **Confirm the pod is gone.** The log ends in `TERMINATED via rest: HTTP 204` and
@@ -216,13 +217,13 @@ nothing yet.
 
 | Log line | Meaning |
 |---|---|
-| `graded 105 · new guesses 105 · errors 0` | success |
+| `graded 151 · new guesses 151 · errors 0` | success |
 | `nothing to do` | already processed, or vendor has not published. Correct, not a failure |
 | `run exit=137` | OOM. Should not recur (worker count is cgroup-aware), but report it |
-| `[publish] ResearchGate: predictions appended +105 …` | the dashboard has the run |
+| `[publish] ResearchGate: predictions appended +151 …` | the dashboard has the run |
 | `[publish] FAILED: …` | run succeeded, dashboard stale — republish from the laptop (step 6). `ServerSelectionTimeoutError` from the pod usually means Atlas Network Access does not allow it |
 | no `publishing latest/` line after `run exit=0` | `MONGO_URI` was empty in `.env` at launch — republish from the laptop |
-| `to grade : <105` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like, if any are ever staged again (step 0) |
+| `to grade : <151` | stored file was clobbered — re-merge before rerunning; a handful short is also what stale staged ext tickers look like, if any are ever staged again (step 0) |
 | `no prior predictions.parquet … run a full backtest first` | no rebuild has merged — step 2 should have caught it; run `/quarterly-backtest` |
 | `TERMINATED via rest: HTTP 204` | the pod deleted itself and is gone — nothing to clean up |
 | `!! TERMINATION NOT CONFIRMED` | every rung of the terminate ladder refused; the pod is idling and billing — `scripts/reap_pods.sh` (step 5). A 403 here means the Cloudflare UA block is back, so check the User-Agent in `bootstrap.sh` |

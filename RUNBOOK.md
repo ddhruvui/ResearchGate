@@ -61,7 +61,7 @@ Or:
 ```
 
 **What happens:** clears `results/ResearchGate/runs/` on the volume, checks for
-ext tickers to stage (none for the current universe), replays all 105 tickers
+ext tickers to stage, replays all 151 tickers
 from 2021-01-04 across 20 parallel pods with PSO re-tuning at every quarter
 boundary, then merges and rescores
 globally and publishes the merged run to MongoDB, replacing the old run's rows
@@ -188,7 +188,7 @@ FAILED`, then run the daily or republish by hand.
 | Symptom | What it means | Fix |
 |---|---|---|
 | `nothing to do` | already processed, or vendor hasn't published | Not a failure. Check the source's newest bar |
-| `to grade : <105` | stored forecast file was clobbered (or, if any ext tickers are ever staged again, they went stale) | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh staged names |
+| `to grade : <151` | stored forecast file was clobbered (or, if any ext tickers are ever staged again, they went stale) | `python3 -m src.merge --shards 20` to restore; `python3 -m src.fetch_ext` to refresh staged names |
 | `no prior predictions.parquet … run a full backtest first` | no rebuild has merged since results were cleared | Run the full rebuild |
 | `!! TERMINATION NOT CONFIRMED`, pod still listed after the run | every rung of the terminate ladder refused; the pod is idling and billing | `scripts/reap_pods.sh` (or `--watch --until-empty` alongside a run). A 403 here means the Cloudflare UA block is back — check the User-Agent in `bootstrap.sh` |
 | `No module named 'src'` on several shards right after launch | pods shared one unpack dir on the volume and wiped each other's code | Fixed in `scripts/bootstrap.sh` (unpacks to container disk); if it recurs, check nothing unpacks under `/workspace` |

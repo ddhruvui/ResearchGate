@@ -1,11 +1,11 @@
 ---
 name: quarterly-backtest
-description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 105 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~30 minutes end to end. Not for everyday operation — use daily-run for that.
+description: Run and monitor a full walk-forward rebuild of the PSO+LS-SVM backtest — 151 tickers replayed from 2021 with quarterly PSO re-tuning, sharded across 20 RunPod pods, then merged and rescored. Use when the user asks to re-run the backtest from scratch, changes a model setting (fitness, window, kernel, re-tune cadence) or the universe and wants it revalidated, or says "start over" / "rebuild". Takes ~30 minutes end to end. Not for everyday operation — use daily-run for that.
 ---
 
 # Quarterly backtest (full rebuild)
 
-Replays every session from 2021-01-04 to the latest bar for all 105 tickers,
+Replays every session from 2021-01-04 to the latest bar for all 151 tickers,
 re-tuning PSO at each quarter boundary on trailing data only. **~30 minutes end
 to end, ~$2–3**, 20 parallel pods — *if every pod is deleted as soon as its shard
 lands* (step 4). Measured 2026-09-17 (105 tickers through the 9/16 bar, all 20
@@ -72,9 +72,10 @@ cd /Users/dhruvdesai/Development/ResearchGate
 bash -c 'set -a; . ./.env; set +a; python3 -m src.fetch_ext'
 ```
 
-For the current 105-name universe this prints
-`universe 105 | on source volume 105 | to stage …: 0` — every name is on the
-source volume (SPY/QQQ via `data.source_keys`) and nothing is fetched. If it
+The 151-name universe (2026-10-23) has not been checked against the source
+volume yet; the old 105-name list printed `to stage …: 0`. Expect this to print
+`universe 151 | on source volume N | to stage …: 151−N` and stage any names the
+acquisition pipeline does not cover (SPY/QQQ count as covered via `data.source_keys`). If it
 ever stages names, every staged ticker must report its last bar at the same date
 the source volume carries (compare with AAPL); do not launch with failures
 outstanding.
@@ -192,7 +193,7 @@ It **refuses to publish partial results** to `latest/` (exit 2) — that guard i
 deliberate, since a reader cannot tell 80 tickers from 100 once published. To
 get an early read, `--allow-partial` routes to `latest_partial/` instead.
 
-The merge rescores **globally** across all 105 tickers, so accuracy and baselines
+The merge rescores **globally** across all tickers, so accuracy and baselines
 are not averages of per-shard averages.
 
 It then **publishes to MongoDB itself** (`src.merge` → `publish(full=True)`):
