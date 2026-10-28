@@ -5,7 +5,7 @@
 # touched. Run it after any change to reap_pods.sh:  scripts/test_reap_pods.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-STUB="$(mktemp -d -t reaptest)"
+STUB="$(mktemp -d "${TMPDIR:-/tmp}/reaptest.XXXXXX")"
 trap 'rm -rf "$STUB"' EXIT
 
 # classify() reads logs through tail_log; point that at files we write instead.

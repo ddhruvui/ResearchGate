@@ -74,7 +74,8 @@ if [ -n "$FORCE" ] && [ -z "$ONLY" ]; then
   exit 2
 fi
 
-TMP="$(mktemp -d -t reappods)"
+# GNU mktemp (the GitHub runner) rejects a template without XXX; BSD (macOS) accepts it.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/reappods.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 say() { echo "[$(date -u +%H:%M:%SZ)] reap: $*"; }
 

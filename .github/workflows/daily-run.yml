@@ -132,6 +132,8 @@ jobs:
       - name: reap pods
         if: always() && steps.gate.outputs.run == 'true' && steps.pre.outputs.launch == 'true'
         run: |
+          # pipefail: without it `| tee` hides a reaper that dies at startup and the step goes green.
+          set -o pipefail
           scripts/reap_pods.sh --watch --until-empty --deadline 4500 | tee "$RUNNER_TEMP/reap.log"
           if grep -q 'FAILED' "$RUNNER_TEMP/reap.log"; then
             echo "::error::the daily run or its cleanup failed — see the reap log above and the pod log under _pod_logs/"
