@@ -75,6 +75,18 @@ jobs:
             esac
           done < .env
 
+      # The runner image's aws CLI gets updated under us; a newer build's GetObject is rejected by
+      # RunPod's S3 with SignatureDoesNotMatch (ls and uploads still work). 2.31.18 is what the Mac
+      # runs, and its downloads work against the same volume and keys.
+      - name: pin aws CLI 2.31.18
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          echo "runner image aws: $(aws --version 2>&1)"
+          curl -sSfL https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.31.18.zip -o "$RUNNER_TEMP/awscli.zip"
+          unzip -q "$RUNNER_TEMP/awscli.zip" -d "$RUNNER_TEMP/awscli"
+          sudo "$RUNNER_TEMP/awscli/aws/install" --update
+          aws --version
+
       - name: install pyarrow (preflight reads next_session.parquet)
         if: steps.gate.outputs.run == 'true'
         run: pip install --quiet pyarrow
@@ -92,8 +104,14 @@ jobs:
           for t in AAPL MSFT AVGO; do
             aws s3 cp $S3FLAGS "$SRC_BUCKET/data/ohlcv/$t.json" "$W/$t.json" --only-show-errors
           done
-          if ! aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/next_session.parquet" "$W/ns.parquet" --only-show-errors; then
-            echo "::error::no latest/next_session.parquet — nothing to grade; run /quarterly-backtest first"
+          NS="$DST_ROOT/runs/pso_lssvm_v1/latest/next_session.parquet"
+          if ! aws s3 cp $S3FLAGS "$NS" "$W/ns.parquet" --only-show-errors; then
+            # A failed GET is not proof the file is missing: ask `ls` before blaming the backtest.
+            if aws s3 ls $S3FLAGS "$NS" >/dev/null 2>&1; then
+              echo "::error::latest/next_session.parquet exists but could not be downloaded — S3 GET is failing on this runner (see the aws error above), not a missing backtest"
+            else
+              echo "::error::no latest/next_session.parquet — nothing to grade; run /quarterly-backtest first"
+            fi
             exit 1
           fi
           python3 - "$W" <<'PY'
