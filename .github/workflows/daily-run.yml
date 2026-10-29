@@ -30,7 +30,9 @@ permissions:
 
 jobs:
   daily:
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-latest's move to 26.04 (2026-10-29) `aws s3 cp` downloads failed on the runner,
+    # so preflight read the stored next_session.parquet as missing and failed the 04:30 run.
+    runs-on: ubuntu-24.04
     # A daily is ~1 min of compute; the slow parts are placing a pod and the reaper's wait.
     # WATCHDOG_SEC=3600 kills the pod's run at 1 h, so 90 min covers placement + reaping.
     timeout-minutes: 90
@@ -88,9 +90,9 @@ jobs:
           set +e; . scripts/_common.sh; set +e
           W="$RUNNER_TEMP/pre"; mkdir -p "$W"
           for t in AAPL MSFT AVGO; do
-            aws s3 cp $S3FLAGS "$SRC_BUCKET/data/ohlcv/$t.json" "$W/$t.json" --quiet
+            aws s3 cp $S3FLAGS "$SRC_BUCKET/data/ohlcv/$t.json" "$W/$t.json" --only-show-errors
           done
-          if ! aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/next_session.parquet" "$W/ns.parquet" --quiet; then
+          if ! aws s3 cp $S3FLAGS "$DST_ROOT/runs/pso_lssvm_v1/latest/next_session.parquet" "$W/ns.parquet" --only-show-errors; then
             echo "::error::no latest/next_session.parquet — nothing to grade; run /quarterly-backtest first"
             exit 1
           fi
