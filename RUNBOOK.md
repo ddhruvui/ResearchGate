@@ -168,6 +168,17 @@ bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.pub
 `src.strategy` only reads `latest/predictions.parquet`; it cannot change a
 prediction, a grade or a metric, so it is always safe to re-run.
 
+The **2-week swing table** ("How far each stock swings in 2 weeks") comes from
+`latest/ranges.json`, refreshed the same way. If it is missing, or its "to
+<date>" is behind the rest of the page, recompute and republish:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.ranges && python3 -m src.publish_mongo'
+```
+
+`src.ranges` only reads the bars; it never touches a prediction. Stocks whose
+bars stop before the rest are marked "bars end <date>" in the table.
+
 A **"last published N days ago" banner** means Mongo has not been written to
 for more than five days — the daily run did not go through, or its publish step
 failed. Check the pod log for `publishing latest/ to MongoDB` and `[publish]

@@ -103,6 +103,13 @@ def main() -> int:
             compute_strategy()
         except Exception as exc:
             print(f"stop-loss strategy failed (predictions are still published): {exc}")
+        # The 2-week swing table reads only the bars, so it cannot be stale against
+        # the rebuild; it is refreshed here so a rebuild never ships an old one.
+        try:
+            from .ranges import compute as compute_ranges
+            compute_ranges()
+        except Exception as exc:
+            print(f"2-week swing table failed (predictions are still published): {exc}")
         try:
             from .publish_mongo import publish
             publish(full=True)

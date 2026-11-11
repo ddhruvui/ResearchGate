@@ -80,6 +80,9 @@ sync 2>/dev/null
 if [ "$ec" -eq 0 ] && { [ "${RUN_MODE:-both}" = "daily" ] || [ "${SHARDS:-1}" -le 1 ]; }; then
   echo "computing stop-loss paper trade ..."
   timeout 1800 python -m src.strategy || echo "!! strategy failed (the run itself succeeded)"
+  # The 2-week swing table: reads only the bars, writes only latest/ranges.json.
+  echo "computing 2-week swing table ..."
+  timeout 600 python -m src.ranges || echo "!! ranges failed (the run itself succeeded)"
 fi
 
 # Publish latest/ to MongoDB for the deployed dashboard. Only when this pod wrote

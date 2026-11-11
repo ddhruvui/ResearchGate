@@ -70,6 +70,14 @@ bash -c 'set -a; . ./.env; set +a; python3 -m src.strategy && python3 -m src.pub
 `src.strategy` is a pure reader of `latest/predictions.parquet` — it cannot
 change a prediction, a grade or a metric, so it is always safe to re-run.
 
+The **"How far each stock swings in 2 weeks"** card is fed by `latest/ranges.json`
+(`/api/ranges`). It comes from the bars alone, so it is the same under Midrun. If
+it is missing, or its "to <date>" lags the rest of the page:
+
+```bash
+bash -c 'set -a; . ./.env; set +a; python3 -m src.ranges && python3 -m src.publish_mongo'
+```
+
 `MONGO_URI` / `DB_PASSWORD` / `MONGO_DB` come from `.env` (gitignored). The pod
 gets the same three keys through `scripts/launch.sh`, so a daily run publishes on
 its own; the pod log shows `publishing latest/ to MongoDB` and the `[publish]`
@@ -116,6 +124,8 @@ FAILED` in the newest `results/ResearchGate/_pod_logs/` entry, fix per the table
 | `/api/tickers` | per-ticker leaderboard |
 | `/api/next-session` | live predictions, sorted, with the up/down split |
 | `/api/predictions?ticker=A,B&from=&to=&source=live&page=1&limit=500` | graded rows, paginated |
+| `/api/strategy` | the stop-loss paper trade: rollup + per-ticker totals |
+| `/api/ranges` | the 2-week swing per stock: latest 10-session high/low + past-year / since-2021 distribution; always the ResearchGate db |
 | `/api/runs` | every published run |
 
 ## 6. Reporting what is on screen

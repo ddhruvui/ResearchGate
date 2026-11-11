@@ -226,7 +226,8 @@ It needs `MONGO_URI`, `DB_PASSWORD` and `MONGO_DB` in `.env` (see
 publisher also pre-computes the equity curves for the UI's cost levels, so the
 API never scans the 220k-row `predictions` collection on a page load, and copies
 `strategy.json` into a `strategy` collection (one document per ticker) that the
-UI's stop-loss table reads. See
+UI's stop-loss table reads, and `ranges.json` into a `ranges` collection for the
+2-week swing table. See
 `RUNBOOK.md` for the day-to-day commands.
 
 ### The stop-loss paper trade
@@ -272,6 +273,38 @@ python3 -m src.strategy --dry-run       # totals only, write nothing
 It runs automatically after a daily run (`scripts/bootstrap.sh`) and after a
 rebuild (`src.merge`), before the Mongo publish that ships it.
 
+### The 2-week swing
+
+`src/ranges.py` answers a question that has nothing to do with the model: **how
+far does each stock usually move in two weeks?** For every session it takes the
+10 sessions ending there and computes
+
+```
+range = max(adj_high) / min(adj_low) - 1         bottom of the fortnight to the top
+```
+
+on split-adjusted bars, counted in sessions so a holiday week is still 10. Each
+stock gets its latest window (with the sessions that set the high and the low) and
+the distribution of every window in two periods — the last 252 sessions, and
+since `backtest.start` (or since listing) — as percentiles, a 0.5% histogram and
+the share of windows narrower than the latest one. The dashboard draws that
+histogram per stock; the question is about a distribution, not a time series.
+
+It reads only the bars and writes only `latest/ranges.json`, and it is
+**recomputed on every run, never appended**: the past-year set drops its oldest
+window daily, a missed day heals on the next run, and a corrected vendor bar or a
+new ticker needs no backfill. Consecutive windows share 9 of 10 sessions, so a
+year of windows holds only ~25 separate fortnights; the page says so.
+
+```sh
+python3 -m src.ranges                   # write latest/ranges.json (~10 s for 151 stocks)
+python3 -m src.ranges --dry-run --local-out /tmp/rg   # compute, keep a local copy only
+```
+
+Like the stop-loss trade it runs after a daily run and after a rebuild, before
+the publish, which copies it into a `ranges` collection (one document per ticker,
+replaced wholesale).
+
 ### Cost
 
 An LS-SVM fit solves a dense `(n+1)x(n+1)` system, so cost is `O(n^3)` in the
@@ -298,6 +331,7 @@ src/metrics.py           direction, baselines, per-year
 src/run.py               entrypoint
 src/daily.py             grade -> learn -> guess, the everyday path
 src/strategy.py          the $10k-per-stock stop-loss paper trade (reads only)
+src/ranges.py            the 2-week swing per stock, from the bars (reads only)
 src/publish_mongo.py     latest/ -> MongoDB Atlas, for the deployed dashboard
 scripts/launch.sh        bundle -> results/ResearchGate/code -> CPU pod -> self-terminate
 scripts/reap_pods.sh     host-side reaper: deletes pods whose run has finished

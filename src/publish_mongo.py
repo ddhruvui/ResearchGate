@@ -22,6 +22,11 @@ Collections written, in database MONGO_DB:
                   src/strategy.py: per-stop summary, the daily balance series and
                   tomorrow's pending plan. Absent when strategy.json has not been
                   written, which is not an error — the rest still publishes.
+    ranges        _id = "<run_id>:<ticker>". The 2-week swing from src/ranges.py:
+                  the latest 10-session window and the past-year / since-2021
+                  distribution of every window. Replaced wholesale on every publish
+                  (it is a pure function of the bars); absent when ranges.json has
+                  not been written, which is not an error either.
 
 Graded verdicts are locked upstream, so a daily publish only inserts rows Mongo
 does not have yet. A rebuild changes the old rows too; src.merge passes full=True,
@@ -96,7 +101,7 @@ def _read_all(get):
 
     return (metrics, preds, opt_parquet("next_session.parquet"),
             opt_json("run_meta.json"), opt_json("ticker_info.json"),
-            opt_json("strategy.json"))
+            opt_json("strategy.json"), opt_json("ranges.json"))
 
 
 def load_from_s3(env: Env, base: str):
@@ -286,7 +291,17 @@ def strategy_docs(strategy: dict | None, run_id: str) -> list[dict]:
             for t in strategy["tickers"] if t.get("ticker")]
 
 
-def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin) -> dict:
+def ranges_docs(ranges: dict | None, run_id: str) -> list[dict]:
+    """One document per ticker, histogram counts included: they are what the
+    per-stock chart draws, and the whole universe is ~150 KB."""
+    if not ranges or not isinstance(ranges.get("tickers"), list):
+        return []
+    return [{"_id": f"{run_id}:{t['ticker']}", "run_id": run_id, **t}
+            for t in ranges["tickers"] if t.get("ticker")]
+
+
+def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin,
+          ranges=None) -> dict:
     rows = ui_rows(preds)
     by_source: dict[str, int] = {}
     for r in rows:
@@ -303,6 +318,7 @@ def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin) -
     equity = {c: equity_curve(rows, c) for c in COSTS_BPS}
     nxt = next_session_rows(ns)
     strat = strategy_docs(strategy, run_id)
+    rng = ranges_docs(ranges, run_id)
 
     pdocs = preds.copy()
     pdocs["date"] = _iso(pdocs["date"])
@@ -318,6 +334,7 @@ def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin) -
         "equity": equity,
         "next_session": nxt,
         "strategy": strat,
+        "ranges": rng,
         "predictions": _records(pdocs),
         "max_date": max_date,
         "run_doc": {
@@ -339,6 +356,7 @@ def build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin) -
             "ticker_info": ticker_info,
             "strategy": ({"meta": strategy.get("meta"), "rollup": strategy.get("rollup")}
                          if strategy else None),
+            "ranges": ranges.get("meta") if rng else None,
         },
     }
 
@@ -356,6 +374,7 @@ def ensure_indexes(db) -> None:
     db["next_session"].create_index([("run_id", ASCENDING), ("pred", ASCENDING)], name="run_pred")
     db["equity"].create_index([("run_id", ASCENDING)], name="run")
     db["strategy"].create_index([("run_id", ASCENDING), ("ticker", ASCENDING)], name="run_ticker")
+    db["ranges"].create_index([("run_id", ASCENDING), ("ticker", ASCENDING)], name="run_ticker")
 
 
 def write_predictions(db, run_id: str, docs: list[dict], full: bool, preds: pd.DataFrame) -> tuple[int, str]:
@@ -414,6 +433,17 @@ def write_all(db, b: dict, full: bool, preds: pd.DataFrame) -> dict:
         db["strategy"].bulk_write(ops, ordered=True)
         n_strat = len(b["strategy"])
 
+    # The 2-week swing, the same way: recomputed from the bars on every run, so the
+    # run's docs are replaced and any stock that left the universe is dropped.
+    # Skipped when ranges.json was absent, leaving the previous table in place.
+    n_rng = 0
+    if b["ranges"]:
+        ops = [ReplaceOne({"_id": d["_id"]}, d, upsert=True) for d in b["ranges"]]
+        keep = [d["_id"] for d in b["ranges"]]
+        ops.append(DeleteMany({"run_id": run_id, "_id": {"$nin": keep}}))
+        db["ranges"].bulk_write(ops, ordered=True)
+        n_rng = len(b["ranges"])
+
     doc = dict(b["run_doc"])
     doc["published_at"] = datetime.now(timezone.utc).isoformat()
     doc["fingerprint"] = fingerprint(preds, None)
@@ -422,7 +452,7 @@ def write_all(db, b: dict, full: bool, preds: pd.DataFrame) -> dict:
 
     return {"predictions": n_pred, "mode": mode, "in_mongo": doc["predictions_in_mongo"],
             "next_session": len(b["next_session"]), "equity_curves": len(b["equity"]),
-            "strategy": n_strat,
+            "strategy": n_strat, "ranges": n_rng,
             "published_at": doc["published_at"], "secs": round(time.time() - t0, 1)}
 
 
@@ -441,14 +471,17 @@ def publish(*, full: bool = False, from_dir: str | None = None, config: str | No
     base = f"{cfg.get('output', {}).get('prefix', 'runs')}/{run_id}"
 
     if from_dir:
-        (metrics, preds, ns, run_meta, ticker_info, strategy), origin = load_from_dir(Path(from_dir))
+        (metrics, preds, ns, run_meta, ticker_info, strategy, ranges), origin = \
+            load_from_dir(Path(from_dir))
     else:
-        (metrics, preds, ns, run_meta, ticker_info, strategy), origin = load_from_s3(Env.load(), base)
+        (metrics, preds, ns, run_meta, ticker_info, strategy, ranges), origin = \
+            load_from_s3(Env.load(), base)
     print(f"[publish] {origin}: {len(preds):,} rows, {len(ns) if ns is not None else 0} "
           f"live guesses, strategy "
-          f"{len(strategy.get('tickers', [])) if strategy else 0} tickers", flush=True)
+          f"{len(strategy.get('tickers', [])) if strategy else 0} tickers, ranges "
+          f"{len(ranges.get('tickers', [])) if ranges else 0} tickers", flush=True)
 
-    b = build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin)
+    b = build(metrics, preds, ns, run_meta, ticker_info, strategy, run_id, origin, ranges=ranges)
     o = b["summary"]["overall"]
     print(f"[publish] overall n={o.get('n'):,} acc={o.get('direction_accuracy', 0):.4f} "
           f"edge={o.get('edge_vs_always_up', 0):+.4f}; equity@5bps "
@@ -464,6 +497,7 @@ def publish(*, full: bool = False, from_dir: str | None = None, config: str | No
     print(f"[publish] {db.name}: predictions {out['mode']} +{out['predictions']:,} "
           f"(now {out['in_mongo']:,}), next_session {out['next_session']}, "
           f"equity {out['equity_curves']} curves, strategy {out['strategy']} tickers, "
+          f"ranges {out['ranges']} tickers, "
           f"{out['secs']}s", flush=True)
     client.close()
     return out
