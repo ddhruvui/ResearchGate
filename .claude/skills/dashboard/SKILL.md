@@ -126,6 +126,8 @@ FAILED` in the newest `results/ResearchGate/_pod_logs/` entry, fix per the table
 | `/api/predictions?ticker=A,B&from=&to=&source=live&page=1&limit=500` | graded rows, paginated |
 | `/api/strategy` | the stop-loss paper trade: rollup + per-ticker totals |
 | `/api/ranges` | the 2-week swing per stock: latest 10-session high/low + past-year / since-2021 distribution; always the ResearchGate db |
+| `/api/last-price` | every ticker's latest price from the `LastPrice` database (ResearchGateEOD's `src.yahoo_last_price`, every 10 min Sun 20:00–Fri 20:00 ET); the **Last** column on Tomorrow |
+| `/api/live-price?tickers=A,B` | EODHD's tape right now, never cached; what **Get live price** swaps the column to |
 | `/api/runs` | every published run |
 
 ## 6. Reporting what is on screen
